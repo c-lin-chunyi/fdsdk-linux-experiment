@@ -1,0 +1,6 @@
+projects:
+  myos:
+    base/shell-compat.bst:
+    - ref: v0.5.13.5-0-g037bbdfd330017c368caf6242f977974123239b5
+    kernel/linux-virt.bst:
+    - ref: b4c5dfbe51a364a6c7f03869200f88c8e1f77403539005f14b7fc6bc91b8d8ba

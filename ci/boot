@@ -1,0 +1,13 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+#
+# Boot the checked-out Virt image on this host (HVF on macOS, KVM or TCG on Linux) and
+# wait for MYOS_BOOT_OK on the serial console. The image itself is never modified.
+#   ./ci/boot [path/to/disk.raw]
+
+# shellcheck source=ci/lib.sh
+. "$(dirname "$0")/lib.sh"
+
+image="${1:-$OUT/disk.raw}"
+[ -f "$image" ] || die "$image not found; run ./ci/image first"
+python3 "$REPO/tools/qemu-test.py" --arch "$ARCH" --image "$image" --log "$(dirname "$image")/serial.log"

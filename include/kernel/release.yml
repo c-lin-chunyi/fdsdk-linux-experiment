@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: MIT
+#
+# Kernel source channel "release": the selected final upstream release (docs/spec.md §11.2).
+# The exact ref (tarball sha256) lives in project.refs. rc/main channels get sibling files.
+
+variables:
+  linux-channel: release
+
+sources:
+- kind: tar
+  url: kernel_files:linux/kernel/v7.x/linux-7.2.9.tar.xz

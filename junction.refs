@@ -1,0 +1,8 @@
+projects:
+  myos:
+    junctions/buildstream-plugins.bst:
+    - ref: 158f9dfe7936f5e7758af3ccc689fda8a9a0673538f0b14100874d6d83b1300a
+    junctions/buildstream-plugins-community.bst:
+    - ref: 28ccf91c48044ea2889b2dc2a5b5644e5e625479d87a8feb7214a4d1bfd6179a
+    junctions/freedesktop-sdk.bst:
+    - ref: freedesktop-sdk-26.08.2-0-g32c5fea70e827885fc805d38a9dc5716c39ed173

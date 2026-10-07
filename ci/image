@@ -1,0 +1,13 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+#
+# Build the Virt disk image and check it out to out/<arch>/virt/disk.raw.
+
+# shellcheck source=ci/lib.sh
+. "$(dirname "$0")/lib.sh"
+
+bst_run build image/disk-virt.bst
+rm -rf "$OUT"
+mkdir -p "$(dirname "$OUT")"
+bst_run artifact checkout --directory "$OUT" image/disk-virt.bst
+log "image: $OUT/disk.raw"

@@ -1,0 +1,9 @@
+NAME="@OS_NAME@"
+ID=@OS_ID@
+VERSION_ID=@OS_VERSION@
+VERSION="@OS_VERSION@ (development)"
+PRETTY_NAME="@OS_NAME@ @OS_VERSION@ (development)"
+SYSEXT_LEVEL=@OS_VERSION@
+CONFEXT_LEVEL=@OS_VERSION@
+ARCHITECTURE=@ARCHITECTURE@
+HOME_URL="https://github.com/c-lin-chunyi/fdsdk-linux-experiment"

@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: MIT
+#
+# URL aliases for sources owned by this project. FDSDK elements use FDSDK's own aliases.
+
+gitlab: https://gitlab.com/
+github: https://github.com/
+kernel: https://git.kernel.org/pub/scm/
+kernel_files: https://cdn.kernel.org/pub/
+pypi: https://files.pythonhosted.org/packages/

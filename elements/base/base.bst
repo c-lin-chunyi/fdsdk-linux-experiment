@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: MIT
+
+kind: stack
+description: |
+  The smallest bootable MyOS userspace (docs/spec.md §5), shared by every profile.
+  Additions need a demonstrated runtime requirement.
+
+depends:
+- base/runtime.bst
+- base/systemd.bst
+- base/ipc.bst
+- base/security.bst
+- base/shell-compat.bst
+- base/os-release.bst
+- base/config.bst

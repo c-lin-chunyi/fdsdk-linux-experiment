@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: MIT
+#
+# Applied at image build time with `systemctl --root=... preset-all`.
+
+enable dbus-broker.service
+enable systemd-networkd.service
+enable systemd-resolved.service
+enable systemd-timesyncd.service
+enable myos-boot-ok.service
+
+# Not part of the base (docs/spec.md §5.2); FDSDK's audit package presets enable them.
+disable auditd.service
+disable audit-rules.service

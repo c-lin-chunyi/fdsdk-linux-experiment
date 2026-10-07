@@ -1,0 +1,11 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+#
+# Build a BuildStream target in the builder. Default: the Virt disk image.
+#   ./ci/build [element.bst...]
+
+# shellcheck source=ci/lib.sh
+. "$(dirname "$0")/lib.sh"
+
+[ "$#" -gt 0 ] || set -- image/disk-virt.bst
+bst_run build "$@"

@@ -42,7 +42,7 @@ PY
 log "shellcheck: ci/"
 if command -v shellcheck >/dev/null; then
     shellcheck --external-sources ci/lib.sh ci/bootstrap ci/check ci/build ci/build-kernel \
-        ci/image ci/boot ci/test-base ci/test-all
+        ci/image ci/boot ci/test-base ci/test-all ci/integrate
 elif [ "${CI:-}" = true ]; then
     die "shellcheck is required in CI"
 else

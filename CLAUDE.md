@@ -10,5 +10,8 @@
   milestone scope; these are where the spec's invariants are easiest to break.
 - When you deviate from or interpret `docs/spec.md`, add an entry to `docs/decisions.md`
   in the same change.
+- Component updates happen through `./ci/integrate`, not by editing refs. Don't pass
+  `--commit` unless asked. A failed cycle is a result to report (it names the inputs that
+  changed), not something to hide by pinning; propose a pin and let the user decide.
 - Do not commit or push unless asked. Do not delete or recreate the `myos-builder` VM
   without asking: it holds the BuildStream cache.

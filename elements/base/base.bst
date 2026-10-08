@@ -2,7 +2,7 @@
 
 kind: stack
 description: |
-  The smallest bootable MyOS userspace (docs/spec.md §5), shared by every profile.
+  The smallest bootable Beamline userspace (docs/spec.md §5), shared by every profile.
   Additions need a demonstrated runtime requirement.
 
 depends:

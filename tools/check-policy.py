@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""Static policy checks for MyOS trees and unit files (docs/spec.md §2.1, §6, §18.1).
+"""Static policy checks for Beamline trees and unit files (docs/spec.md §2.1, §6, §18.1).
 
   --units DIR...   Reject shell constructs in Exec*= lines of unit files.
   --tree SYSROOT   Reject bash, su/sudo, package managers and a non-dash /usr/bin/sh.
@@ -32,6 +32,8 @@ UNIT_SUFFIXES = (".service", ".socket", ".timer", ".path", ".mount", ".target")
 FORBIDDEN_BINARIES = [
     # Shell policy (docs/spec.md §6) and root identity (§18.1)
     "bash", "su", "sudo",
+    # The initrd is project-owned (§13)
+    "dracut",
     # Package managers and out-of-tree module builds (§2.1)
     "rpm", "dnf", "yum", "microdnf", "zypper", "apt", "apt-get", "dpkg",
     "pacman", "emerge", "apk", "dkms",

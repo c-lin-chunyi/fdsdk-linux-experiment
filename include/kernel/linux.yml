@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: MIT
+#
+# Linux kernel source (docs/spec.md §11.2): the `master` branch of Linus Torvalds' tree,
+# resolved to an exact commit by each integration cycle (ref in project.refs). Shared by
+# every profile kernel. git_repo fetches shallowly: the depth is the distance from the
+# nearest tag in the git-describe ref, not the whole history.
+
+sources:
+- kind: git_repo
+  url: kernel:linux/kernel/git/torvalds/linux.git
+  track: master
+  version-guess-pattern: '(\d+)\.(\d+)'

@@ -1,0 +1,43 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+#
+# One integration cycle (docs/spec.md §17.1): resolve the tracked upstream HEADs to exact
+# commits, build and test the whole snapshot, and record it as green or failed.
+#   ./ci/integrate [--force] [--no-commit]
+#
+# --force      integrate even if nothing changed since latest-green
+# --no-commit  on green, do not commit the refs or tag snapshot-<id> (§17.4; a dirty
+#              tree is never committed either)
+
+# shellcheck source=ci/lib.sh
+. "$(dirname "$0")/lib.sh"
+
+force=
+no_commit=
+for arg in "$@"; do
+    case "$arg" in
+        --force) force=--force ;;
+        --no-commit) no_commit=--no-commit ;;
+        *) die "unknown argument: $arg" ;;
+    esac
+done
+
+set +e
+# shellcheck disable=SC2086 # optional flags expand to nothing
+in_builder python3 tools/integrate.py --arch "$ARCH" resolve $force
+status=$?
+set -e
+case "$status" in
+    0) ;;
+    3) exit 0 ;;
+    4) die "integration failed at resolve (see out/integrations/)" ;;
+    *) die "resolve failed" ;;
+esac
+
+if "$REPO/ci/check" && "$REPO/ci/build" && "$REPO/ci/test-base" && "$REPO/ci/image" && "$REPO/ci/boot"; then
+    # shellcheck disable=SC2086
+    in_builder python3 tools/integrate.py --arch "$ARCH" record --result green $no_commit
+else
+    in_builder python3 tools/integrate.py --arch "$ARCH" record --result failed
+    exit 1
+fi

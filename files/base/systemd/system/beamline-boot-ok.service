@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 #
-# Earliest boot-test protocol (docs/spec.md §29): print MYOS_BOOT_OK on the console
+# Earliest boot-test protocol (docs/spec.md §29): print BEAMLINE_BOOT_OK on the console
 # once multi-user.target is reached. The base has no echo/cat and units must not use a
 # shell, so systemd-escape is the printer: it writes its argument back unchanged.
 
@@ -10,7 +10,7 @@ After=multi-user.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/systemd-escape MYOS_BOOT_OK
+ExecStart=/usr/bin/systemd-escape BEAMLINE_BOOT_OK
 StandardOutput=journal+console
 
 [Install]

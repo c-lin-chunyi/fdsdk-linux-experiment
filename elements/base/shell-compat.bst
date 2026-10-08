@@ -12,6 +12,13 @@ build-depends:
 depends:
 - base/runtime.bst
 
+environment:
+  # automake 1.18's sanity check measures a 0.01 s timestamp resolution in the build
+  # sandbox, but configure and its probe file can still share a timestamp there, making
+  # the "newly created file is older than distributed files" check fail at random.
+  # A one-second resolution makes it sleep long enough to be deterministic.
+  am_cv_filesystem_timestamp_resolution: '1'
+
 config:
   install-commands:
     (>):
@@ -20,4 +27,4 @@ config:
 sources:
 - kind: git_repo
   url: kernel:utils/dash/dash.git
-  track: v*
+  track: master

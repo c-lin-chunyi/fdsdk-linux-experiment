@@ -3,7 +3,8 @@
 kind: manual
 description: |
   /usr/lib/os-release rendered from project.conf identity variables. ID, VERSION_ID,
-  SYSEXT_LEVEL and ARCHITECTURE are the extension compatibility keys (docs/spec.md §8).
+  SYSEXT_LEVEL and ARCHITECTURE are the extension compatibility keys (docs/spec.md §8);
+  IMAGE_VERSION is the snapshot identifier (§17.2).
 
 build-depends:
 - junctions/freedesktop-sdk.bst:public-stacks/runtime-gnu.bst
@@ -23,6 +24,7 @@ config:
     sed -e 's|@OS_ID@|%{os-id}|g' \
         -e 's|@OS_NAME@|%{os-name}|g' \
         -e 's|@OS_VERSION@|%{os-version}|g' \
+        -e 's|@SNAPSHOT@|%{snapshot-id}|g' \
         -e 's|@ARCHITECTURE@|%{os-release-arch}|g' \
         os-release.in > os-release
     install -Dm644 os-release "%{install-root}%{indep-libdir}/os-release"

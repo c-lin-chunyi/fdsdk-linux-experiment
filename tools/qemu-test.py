@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""Boot a MyOS disk image under QEMU and wait for a serial marker (docs/spec.md §25-29).
+"""Boot a Beamline disk image under QEMU and wait for a serial marker (docs/spec.md §25-29).
 
 The image is never written: every run boots a throwaway qcow2 overlay (§28).
 Acceleration is picked automatically (QEMU_ACCEL=auto|hvf|kvm|tcg, §25):
@@ -56,11 +56,17 @@ FIRMWARE_VARS = {
     ],
 }
 
+# A green boot reaches the marker without any failed unit (docs/spec.md §17.1): systemd's
+# [FAILED]/[DEPEND] status lines count as failures, not just panics.
 FAILURE_PATTERNS = [
     re.compile(r"Kernel panic - not syncing"),
     re.compile(r"You are in emergency mode"),
-    re.compile(r"Failed to start .*initrd-switch-root"),
+    re.compile(r"^\[FAILED\] "),
+    re.compile(r"^\[DEPEND\] "),
 ]
+
+# systemd colours its status column; match against the plain text.
+ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;:?]*[A-Za-z]")
 
 DEV_PASSWORD = "dev"  # Interactive debugging only; supplied as a credential, never baked in.
 
@@ -163,11 +169,12 @@ def run_test(cmd, args):
             sys.stdout.flush()
             if log:
                 log.write(line)
+            plain = ANSI_ESCAPE.sub("", line).strip()
             if result["status"] is None:
-                if expect.search(line):
+                if expect.search(plain):
                     result["status"] = "pass"
-                elif any(p.search(line) for p in FAILURE_PATTERNS):
-                    result["status"] = "fail: " + line.strip()
+                elif any(p.search(plain) for p in FAILURE_PATTERNS):
+                    result["status"] = "fail: " + plain
 
     thread = threading.Thread(target=reader, daemon=True)
     thread.start()
@@ -198,7 +205,7 @@ def main():
     parser.add_argument("--arch", default=host_arch(), choices=sorted(FIRMWARE_CODE))
     parser.add_argument("--accel", default=os.environ.get("QEMU_ACCEL", "auto"),
                         choices=["auto", "hvf", "kvm", "tcg"])
-    parser.add_argument("--expect", default="MYOS_BOOT_OK", help="regex that marks success on the serial console")
+    parser.add_argument("--expect", default="BEAMLINE_BOOT_OK", help="regex that marks success on the serial console")
     parser.add_argument("--timeout", type=int, default=None, help="seconds (default 300, 1200 under TCG)")
     parser.add_argument("--memory", default="2G")
     parser.add_argument("--cpus", type=int, default=4)
@@ -214,7 +221,7 @@ def main():
     if args.timeout is None:
         args.timeout = 1200 if accel == "tcg" else 300
 
-    with tempfile.TemporaryDirectory(prefix="myos-qemu-") as workdir:
+    with tempfile.TemporaryDirectory(prefix="beamline-qemu-") as workdir:
         overlay = create_overlay(args.image, workdir, args.disk_size)
         cmd = qemu_command(args, accel, workdir, overlay)
         print(f"qemu-test: accel={accel} arch={args.arch} image={args.image}", file=sys.stderr)

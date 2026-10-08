@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: MIT
+#
+# Upstream tracking policy (docs/spec.md §31). Read by tools/integrate.py.
+#
+# [component.<name>]
+#   url       upstream git repository
+#   branch    designated upstream development branch; the element's `track:` must match
+#   elements  BuildStream elements whose git source (first source) carries this component
+#   refs      file holding those elements' refs: project.refs or junction.refs
+#   select    "head" (default): branch HEAD at resolution time
+#             "gitlab-ci-green": newest branch commit whose upstream pipeline succeeded
+#
+# [component.<name>.pin] is a temporary, visible exception (§31.2): the integration cycle
+# uses `ref` instead of the designated HEAD and every manifest reports it as PINNED.
+#   ref, reason, issue
+#
+# [fixed] lists Layer 0 inputs (§31.3): pinned build tooling, recorded as provenance only.
+
+[component.freedesktop-sdk]
+url = "https://gitlab.com/freedesktop-sdk/freedesktop-sdk.git"
+branch = "master"
+elements = ["junctions/freedesktop-sdk.bst"]
+refs = "junction.refs"
+select = "gitlab-ci-green"
+gitlab_project = "freedesktop-sdk/freedesktop-sdk"
+
+[component.linux]
+url = "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git"
+branch = "master"
+elements = ["kernel/linux-virt.bst"]
+refs = "project.refs"
+
+[component.systemd]
+url = "https://github.com/systemd/systemd.git"
+branch = "main"
+elements = ["overrides/systemd-base.bst"]
+refs = "project.refs"
+
+[component.dash]
+url = "https://git.kernel.org/pub/scm/utils/dash/dash.git"
+branch = "master"
+elements = ["base/shell-compat.bst"]
+refs = "project.refs"
+
+[fixed]
+"junctions/buildstream-plugins.bst" = "buildstream-plugins 2.8.0 (PyPI sdist)"
+"junctions/buildstream-plugins-community.bst" = "buildstream-plugins-community 2.3.3 (PyPI sdist)"

@@ -1,6 +1,8 @@
 projects:
-  myos:
+  beamline:
     base/shell-compat.bst:
     - ref: v0.5.13.5-0-g037bbdfd330017c368caf6242f977974123239b5
     kernel/linux-virt.bst:
-    - ref: b4c5dfbe51a364a6c7f03869200f88c8e1f77403539005f14b7fc6bc91b8d8ba
+    - ref: v7.3-rc6-21-g0c2669a9f4a1d607e7591ae50ccf3c432a0aff08
+    overrides/systemd-base.bst:
+    - ref: v262-337-g6645aa57a2e20678007424ca9125efa99df2925d

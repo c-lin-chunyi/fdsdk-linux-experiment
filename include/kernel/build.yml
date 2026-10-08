@@ -1,9 +1,11 @@
 # SPDX-License-Identifier: MIT
 #
 # Shared build rules for project-owned kernels (docs/spec.md §11-12). A profile kernel
-# sets %{kernel-profile}; the configuration is
-#   <arch defconfig> + common.config + arch-<kernel-arch>.config + <profile>.config
-# and the resolved .config is shipped in the artifact, never committed.
+# sets %{kernel-profile} and %{kernel-base}; the configuration is
+#   <kernel-base> + common.config + arch-<kernel-arch>.config + <profile>.config
+# kernel-base "allnoconfig" (Virt, §11.4) starts from nothing, so only what the fragments
+# request is enabled; "defconfig" (Hardware) starts from the architecture defaults.
+# The resolved .config is shipped in the artifact, never committed.
 
 build-depends:
 - junctions/freedesktop-sdk.bst:public-stacks/buildsystem-make.bst
@@ -27,6 +29,9 @@ environment:
   KBUILD_BUILD_TIMESTAMP: '@%{source-date-epoch}'
   KBUILD_BUILD_USER: '%{os-id}'
   KBUILD_BUILD_HOST: buildstream
+  # Set and empty: no "+" suffix for untagged commits; the release is
+  # <version><profile CONFIG_LOCALVERSION>.
+  LOCALVERSION: ''
   MAXJOBS: '%{max-jobs}'
 
 environment-nocache:
@@ -35,6 +40,7 @@ environment-nocache:
 variables:
   strip-binaries: ''
   kernel-config-dir: '%{datadir}/%{os-id}/kernel-config'
+  kernel-base: defconfig
   kernel-config-fragments: >-
     %{kernel-config-dir}/common.config
     %{kernel-config-dir}/arch-%{kernel-arch}.config
@@ -42,19 +48,23 @@ variables:
 
 config:
   configure-commands:
-  - make defconfig
-
-  - scripts/kconfig/merge_config.sh -m .config %{kernel-config-fragments}
-
-  - make olddefconfig
+  - |
+    if [ "%{kernel-base}" = allnoconfig ]; then
+      # allnoconfig with the fragments as KCONFIG_ALLCONFIG: unrequested symbols stay off.
+      scripts/kconfig/merge_config.sh -n %{kernel-config-fragments}
+    else
+      make %{kernel-base}
+      scripts/kconfig/merge_config.sh -m .config %{kernel-config-fragments}
+      make olddefconfig
+    fi
 
   - |
-    # Every symbol a fragment requests must survive olddefconfig; a silent drop means a
+    # Every symbol a fragment requests must survive configuration; a silent drop means a
     # missing dependency or a renamed symbol.
     grep -hE '^(CONFIG_[A-Za-z0-9_]+=|# CONFIG_[A-Za-z0-9_]+ is not set)' \
       %{kernel-config-fragments} | sort -u > requested.config
     if grep -vxF -f .config requested.config > dropped.config; then
-      echo "Kernel config fragments requested symbols that olddefconfig dropped:" >&2
+      echo "Kernel config fragments requested symbols that configuration dropped:" >&2
       cat dropped.config >&2
       exit 1
     fi

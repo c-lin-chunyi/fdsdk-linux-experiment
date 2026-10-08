@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 #
 # Boot the checked-out Virt image on this host (HVF on macOS, KVM or TCG on Linux) and
-# wait for MYOS_BOOT_OK on the serial console. The image itself is never modified.
+# wait for BEAMLINE_BOOT_OK on the serial console. The image itself is never modified.
 #   ./ci/boot [path/to/disk.raw]
 
 # shellcheck source=ci/lib.sh

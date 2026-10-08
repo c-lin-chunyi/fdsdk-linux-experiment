@@ -7,9 +7,33 @@
 - Primary build system: BuildStream 2
 - Primary upstream substrate: Freedesktop SDK
 - Primary system framework: systemd
+- Revision: 3 (2026-10-08)
 
-> This file is the project's authoritative specification. Deliberate deviations and
-> interpretations are recorded in [decisions.md](decisions.md), not by editing this text.
+> This file is the project's authoritative specification. The project owner changes it by
+> publishing a new revision. Deviations and interpretations made while implementing it are
+> recorded in [decisions.md](decisions.md).
+
+## Revision History
+
+- **Revision 3 (2026-10-08).**
+  - The OS is named **Beamline**, and its reverse-DNS prefix is `org.beamline` (§19).
+  - DATA is an ext4 filesystem mounted at `/data`; `/data/var` and `/data/home` are
+    bind-mounted onto `/var` and `/home` (§14, §15).
+  - The Virt kernel is narrowed: built from `allnoconfig` plus explicit fragments, keeping
+    module support (§11.4).
+  - Base systemd features without a base use are disabled (§5.2).
+  - Every green snapshot is recorded in git: a refs commit tagged `snapshot-<id>` (§17.4).
+  - An override whose upstream recipe changed fails the integration cycle (§31.4).
+- **Revision 2 (2026-10-07).**
+  - The release model is rebuilt around tracking upstream HEADs and promoting immutable
+    snapshots (§2.2, §11.2, §16, §17, §31, §32). The rationale is in
+    [release-model.md](release-model.md).
+  - New target disk layout: XBOOTLDR, A/B SYSTEM partitions with verity, RECOVERY and DATA
+    (§13–§15, §20).
+  - The initrd is project-owned, and dracut is not used (§13).
+  - Coreutils shipped in any artifact are uutils, as a multicall binary (§7.2).
+  - Milestones are remapped (§35–§39), and the non-goals and invariants are updated (§41, §42).
+- **Revision 1.** The initial development specification.
 
 ## 1. Project Objective
 
@@ -21,6 +45,7 @@ The base system shall function as a verified appliance. Graphical desktop softwa
 
 The architecture shall prioritize:
 
+* continuous integration of current upstream development HEADs;
 * reproducible source builds;
 * immutable system artifacts;
 * aggressive use of systemd infrastructure;
@@ -81,6 +106,10 @@ Element overrides shall be introduced only when newer upstream versions require 
 
 Standalone project-owned elements shall be used for components with distribution-specific policy, particularly Linux kernels and image composition.
 
+Freedesktop SDK shall be consumed at its `master` branch, as one of the tracked upstream HEADs (§31). FDSDK master defines the continuously integrated foundation. Its hundreds of components (glibc, GCC, LLVM, OpenSSL, compression libraries, ...) flow into Beamline with each integration cycle, without per-component Beamline policy. Formal FDSDK releases are upstream milestones, not Beamline release boundaries.
+
+Components that define the project's identity shall be promoted out of that foundation and tracked directly at their own upstream HEAD through element overrides. This applies to systemd now, and to Mesa, PipeWire and others as they enter scope. Linux is project-owned (§11). The FDSDK bootstrap and toolchain graph remains FDSDK's responsibility and shall not be forked.
+
 ### 2.3 Exact Sources, Not Moving Builds
 
 Upstream branches shall serve only as update-discovery mechanisms.
@@ -104,6 +133,16 @@ Mesa:
 ```
 
 Reproducibility shall take precedence over direct dependence on mutable branch heads.
+
+In short:
+
+```
+source policy:
+    track HEAD
+
+artifact policy:
+    pin absolutely everything
+```
 
 ### 2.4 Systemd as the Operating-System Framework
 
@@ -320,6 +359,8 @@ dash or equivalent minimal POSIX shell
 
 Additional libraries shall enter the base only through demonstrated runtime requirements.
 
+The base systemd build shall leave out features the base does not use: journal-remote and journal-upload, QR-code output, xkbcommon keymap validation, and AppArmor (SELinux is the planned security module, §21). Features that later milestones need stay enabled: TPM2, FIDO2, cryptsetup, and curl for `systemd-sysupdate` downloads.
+
 ## 6. Shell and Command-Line Policy
 
 Bash shall not be part of the base image.
@@ -396,7 +437,7 @@ Expected contents:
 
 ```
 bash
-coreutils
+uutils coreutils (multicall)
 grep
 sed
 awk
@@ -418,6 +459,8 @@ filesystem diagnostic tools
 ```
 
 Normal installations shall not require permanent activation of `admin.sysext`.
+
+Coreutils shipped in any Beamline artifact (this extension, the recovery environment, or any later image content) shall be uutils coreutils. It shall be deployed as a single multicall `coreutils` binary, with one symlink per utility. GNU coreutils may still serve as a build-time tool inside BuildStream sandboxes, as long as it never reaches an artifact.
 
 ### 7.3 Development Extension
 
@@ -541,33 +584,21 @@ Freedesktop SDK kernel policy shall not dictate final kernel versions.
 
 Kernel builds shall remain reproducible BuildStream artifacts.
 
-### 11.2 Kernel Source Channels
+### 11.2 Kernel Source
 
-Three primary source channels shall exist:
+The kernel shall be built from the `master` branch of Linus Torvalds' tree. In each integration cycle (§17) it is resolved to an exact commit, like every other tracked upstream HEAD.
 
-```
-release
-    latest selected final upstream release
-
-rc
-    latest selected vX.Y-rcN tag
-
-main
-    daily pinned snapshot of Linus master
-```
-
-Optional additional channel:
+There shall be no separate release, rc or main kernel channels. Upstream tags such as `v7.3-rc4` or `v7.3` are metadata: the snapshot manifest records the nearest tag of the selected commit. They are not release lanes.
 
 ```
-stable-rc
-    CI-only testing of pending stable updates
+snapshot-20261008.0600
+
+Linux:
+    commit: abcdef
+    nearest-tag: v7.3-rc4-218-gabcdef
 ```
 
-`main` and `rc` shall remain distinct.
-
-The `rc` channel shall serve as the more practical pre-release testing lane.
-
-The `main` channel shall serve as the highest-churn upstream-integration lane.
+A snapshot that coincides with an interesting upstream tag may be retained as a checkpoint (§17.4).
 
 ### 11.3 Kernel Configuration
 
@@ -613,7 +644,7 @@ CONFIG_DM_VERITY=y
 CONFIG_EFI=y
 ```
 
-The initial Virt kernel shall prioritize successful boot over aggressive size optimization.
+The Virt kernel shall be narrow. It is configured from `allnoconfig` plus explicit, human-maintained fragments (common, architecture, Virt), rather than from an architecture defconfig, so everything it contains is there on purpose. The boot path and the virtual hardware contract (§4) are built in. Loadable module support remains for optional features.
 
 ### 11.5 Hardware Kernel
 
@@ -663,17 +694,19 @@ The intended final boot chain shall be:
 ```
 UEFI Secure Boot
         ↓
-signed UKI
+systemd-boot (ESP)
+        ↓
+signed UKI (XBOOTLDR)
         ↓
 systemd-stub
         ↓
 Linux
         ↓
-systemd-based initrd
+project-owned systemd initrd
         ↓
-dm-verity root discovery
+dm-verity SYSTEM discovery
         ↓
-immutable root
+immutable SYSTEM
         ↓
 systemd
 ```
@@ -688,11 +721,13 @@ os-release metadata
 systemd-stub
 ```
 
-Kernel compilation and UKI generation shall remain separate BuildStream stages.
+The initrd shall be project-owned and assembled from the image's own content: a trimmed copy of the system tree, run by systemd through `initrd.target`. dracut and similar shell-hook initrd generators shall not be used.
+
+Kernel compilation, initrd generation and UKI generation shall remain separate BuildStream stages.
 
 ## 14. Root Filesystem
 
-The final root filesystem shall be read-only and cryptographically verifiable.
+The SYSTEM filesystem (the immutable root and `/usr`) shall be read-only and cryptographically verifiable.
 
 Preferred format:
 
@@ -702,13 +737,13 @@ EROFS
 dm-verity
 ```
 
-Persistent mutable state shall live outside the root image.
+Persistent mutable state shall live outside the SYSTEM image, on the DATA partition (§15).
 
 Primary writable areas:
 
 ```
-/var
-/home or homed-managed storage
+/var                    DATA (/data/var, bind-mounted)
+/home                   DATA (/data/home, bind-mounted); systemd-homed images (<user>.home)
 runtime state under /run
 ```
 
@@ -718,82 +753,150 @@ Arbitrary persistent mutation of `/etc` shall be minimized.
 
 ## 15. Disk Layout
 
-Initial bootstrap layout:
+Target layout:
 
 ```
 GPT
-├── ESP
-├── ROOT
-└── VAR
+├─ ESP                      systemd-boot
+├─ XBOOTLDR
+│  ├─ Beamline current UKI
+│  ├─ Beamline previous UKI
+│  └─ RecoveryOS UKI        a stub for now (§20)
+│
+├─ SYSTEM-A                 EROFS
+├─ SYSTEM-A-VERITY
+├─ SYSTEM-B                 EROFS
+├─ SYSTEM-B-VERITY
+│
+├─ RECOVERY
+├─ RECOVERY-VERITY
+│
+└─ DATA
+   ├─ /var
+   └─ /home
+      ├─ alice.home
+      └─ bob.home
 ```
 
-Final update-capable layout:
+Bring-up progression:
 
 ```
-GPT
-├── ESP
-├── ROOT-A
-├── ROOT-B
-└── VAR
+0.0.1   ESP + ROOT (ext4, read-write)
+0.0.2   ESP + SYSTEM-A (EROFS) + DATA
+0.0.3   ESP + XBOOTLDR + SYSTEM-A/B + VERITY + RECOVERY stub + DATA
 ```
 
-Optional separate home or state partitions may be introduced later.
+DATA shall be an ext4 filesystem mounted at `/data`. Its `var` and `home` directories are bind-mounted onto the standard paths:
+
+```
+/data         DATA partition (ext4)
+/data/var  →  /var     (bind mount)
+/data/home →  /home    (bind mount; systemd-homed images <user>.home)
+```
 
 `systemd-repart` shall define and construct disk layouts.
 
 ## 16. Updates
 
-The final update mechanism shall use `systemd-sysupdate`.
+The update mechanism shall use `systemd-sysupdate`.
 
 Primary update artifacts:
 
 ```
-root image
-UKI
+SYSTEM image + verity
+UKI (installed to XBOOTLDR)
 desktop extension
 other release-coupled extensions
 ```
 
-A/B root updates shall support rollback.
+A/B SYSTEM updates shall support rollback. XBOOTLDR shall retain at least the current and previous UKI.
 
-Stable promotion shall reuse identical artifacts rather than rebuilding equivalent source states.
+An installed machine shall follow exactly one channel pointer (§17.3). It updates when that pointer names a newer snapshot than the one installed. Switching to a channel whose pointer names an older snapshot shall never downgrade automatically: downgrade is an explicit rollback or recovery operation.
 
-Example channel promotion:
+Promotion shall reuse identical artifacts and never rebuild equivalent source states. The digest of a snapshot shall never change.
 
-```
-canary
-   ↓
-edge
-   ↓
-stable
-```
+## 17. Release Model
 
-The digest shall remain unchanged during promotion.
+Rationale: [release-model.md](release-model.md).
 
-## 17. Release Streams
+> Upstream version labels do not define release maturity. The complete immutable system image
+> is the unit of integration, testing, promotion, rollback and support.
 
-Suggested release policy:
+### 17.1 Integration Cycles
+
+An integration cycle:
 
 ```
-canary-main
-    daily selected upstream snapshots
-    Linux master
-    optionally systemd main
-    optionally Mesa main
-
-canary-rc
-    latest kernel RC
-    newer but less chaotic component set
-
-edge
-    latest selected final releases
-    short soak period
-
-stable
-    promoted known-good artifacts
+resolve every tracked upstream HEAD (§31) to an exact commit
+        ↓
+exact source manifest
+        ↓
+build the whole graph
+        ↓
+integration tests
+        ↓
+FAIL → record, logs only          GREEN → snapshot
 ```
 
-Channel identity shall describe promotion state rather than separate source trees.
+Cycles run on a schedule, manually, or when tracked upstreams change. If no tracked input and no project change has moved, no build happens. "Nightly" is only a possible cadence: no build has special status because of when it ran.
+
+### 17.2 Snapshots
+
+A green integration result is a snapshot: installable and immutable, identified by its UTC resolution time:
+
+```
+snapshot-YYYYMMDD.HHMM
+```
+
+A snapshot covers every profile, architecture and extension built from that source graph. The snapshot identifier is the image's `IMAGE_VERSION`. Its manifest records:
+- every source commit, with the nearest upstream tag where meaningful;
+- HEAD conformity and pins (§31);
+- build provenance (Layer 0 versions).
+
+A failed integration publishes nothing, and `latest-green` stays where it was. The project shall not automatically substitute an older commit for a broken component and publish the result. That would silently turn `latest-green` into an undocumented mixture of stale components.
+
+### 17.3 Pointers and Promotion
+
+| Name | Meaning |
+|---|---|
+| `latest-green` | Newest snapshot that passed mandatory integration |
+| `edge` | A green snapshot that survived additional automated and physical-hardware testing and a short soak |
+| `stable` | A green snapshot with enough field evidence to be recommended broadly |
+| `checkpoint` | A snapshot retained permanently |
+
+All of these refer to the same class of immutable snapshot. They differ only in accumulated confidence:
+
+```
+latest-green → snapshot 107
+edge         → snapshot 103
+stable       → snapshot 88
+```
+
+Promotion moves a pointer. It never rebuilds, re-resolves or changes a byte. Test evidence promotes a snapshot; time alone does not. A snapshot with a known regression is simply never promoted. Once `edge` and `stable` exist, their gates shall require the full supported profile and architecture matrix.
+
+### 17.4 Publication and Retention
+
+Every green snapshot shall be recorded in git: the integration cycle commits the resolved refs and tags that commit `snapshot-<id>`. That tag, the refs and the snapshot id reproduce the snapshot. A cycle on a working tree with uncommitted changes outside the refs files still integrates, but it does not commit or tag, so tags always match real history.
+
+Snapshot binaries shall be published as immutable releases tagged `snapshot-<id>`, using GitHub Releases as a binary registry, marked as prereleases. Channel pointers are signed metadata (for example `channels.json`), not moving git tags.
+
+Retention:
+
+```
+ordinary green snapshots         14–30 days
+referenced by any pointer        retained
+checkpoints                      forever
+```
+
+Checkpoints mark snapshots worth keeping: the first snapshot on a new upstream major version or tag, milestone firsts, known-good demonstration images, and fallbacks before major architecture changes.
+
+### 17.5 Maintained Lines
+
+There shall be no maintained (backport) branches unless real demand appears. A maintained line would get its own identity, for example `2027.02.N` derived from a named snapshot. It shall never be presented as a promoted snapshot, because its bytes differ.
+
+### 17.6 Recovery
+
+The RecoveryOS UKI (§20) is the one deliberately conservative artifact and sits outside this model.
 
 ## 18. User Management
 
@@ -896,44 +999,23 @@ firmware update
 Policy roles may include:
 
 ```
-org.example.update
-org.example.manage-users
-org.example.manage-network
-org.example.manage-machines
-org.example.manage-extensions
-org.example.manage-hardware
+org.beamline.update
+org.beamline.manage-users
+org.beamline.manage-network
+org.beamline.manage-machines
+org.beamline.manage-extensions
+org.beamline.manage-hardware
 ```
 
 A broad administrator role may aggregate policy permissions without granting an unrestricted root shell.
 
 ## 20. Recovery Environment
 
-A separately signed recovery UKI shall provide emergency maintenance.
+A separately built RecoveryOS shall provide emergency maintenance: a RecoveryOS UKI on XBOOTLDR together with the RECOVERY and RECOVERY-VERITY partitions (§15).
 
-Example ESP contents:
+For now the RecoveryOS is a stub with no further requirements. Later it is expected to be based on Grml, and to move slowly and independently of the snapshot stream. Any coreutils it ships follow §7.2.
 
-```
-MyOS-current.efi
-MyOS-previous.efi
-MyOS-Recovery.efi
-```
-
-The recovery environment may include:
-
-```
-bash
-coreutils
-cryptsetup
-filesystem repair tools
-systemd-dissect
-systemd-repart
-systemd-sysupdate
-mount tools
-network diagnostics
-journal tools
-```
-
-Normal boot shall not expose equivalent unrestricted root-shell functionality.
+Normal boot shall not expose unrestricted root-shell functionality.
 
 ## 21. SELinux
 
@@ -1066,7 +1148,7 @@ QEMU
    ↓
 HVF
    ↓
-MyOS ARM64
+Beamline ARM64
 ```
 
 Build flow:
@@ -1078,7 +1160,7 @@ Linux builder VM
    ↓
 BuildStream
    ↓
-MyOS ARM64 image
+Beamline ARM64 image
    ↓
 QEMU/HVF on macOS
 ```
@@ -1100,7 +1182,7 @@ KVM
    ↓
 QEMU
    ↓
-MyOS
+Beamline
 ```
 
 Nested KVM shall provide increased CI parity.
@@ -1151,8 +1233,11 @@ ci/
 ├── test-base
 ├── test-desktop
 ├── test-sysupdate
-└── test-all
+├── test-all
+└── integrate
 ```
+
+`./ci/integrate` runs one integration cycle (§17.1): it resolves tracked HEADs, runs the full test sequence, and records a snapshot when green.
 
 Local execution:
 
@@ -1229,7 +1314,7 @@ The original system artifact shall never be modified by testing.
 The earliest boot test may use a serial success marker:
 
 ```
-MYOS_BOOT_OK
+BEAMLINE_BOOT_OK
 ```
 
 Later tests shall verify:
@@ -1277,82 +1362,81 @@ After successful integration, the directory extension shall become an EROFS/raw 
 
 Signed and verity-protected extension delivery shall follow later.
 
-## 31. Component Update Policy
+## 31. Upstream Tracking Policy
 
-A repository policy file shall describe upstream tracking.
-
-Example:
+`policy/tracking.toml` shall define the designated upstream development branch of every tracked component.
 
 ```
-systemd:
-    source: upstream Git
-    canary: main
-    edge: latest final release
+Freedesktop SDK   master
+Linux             master (torvalds)
+systemd           main
+dash              master
 
-Linux:
-    canary-main: Linus master
-    canary-rc: latest RC
-    edge: latest final release
-
-Mesa:
-    canary: main
-    edge: latest release
-
-PipeWire:
-    canary: upstream branch
-    edge: release
-
-labwc:
-    canary: upstream branch
-    edge: known-good revision
+later:
+Mesa              main
+PipeWire          master
+WirePlumber       main
+labwc             master
+wlroots           master
 ```
 
-Closely coupled components shall update as cohorts.
+Rule: track the designated branch unless an explicit temporary exception exists. Never guess which branch looks newest.
 
-Possible cohorts:
+Components inside Freedesktop SDK that are not tracked individually follow FDSDK master. Closely coupled components need no separate cohort rules, because every integration cycle resolves all HEADs together.
 
-```
-graphics:
-    Mesa
-    libdrm
-    Wayland
-    wayland-protocols
+### 31.1 Selection
 
-audio:
-    PipeWire
-    WirePlumber
+A component's selected commit is its branch HEAD at resolution time. For Freedesktop SDK, the selected commit is the newest `master` commit whose upstream CI pipeline succeeded, so that FDSDK's published artifacts exist for it. The manifest records any lag behind master HEAD.
 
-compositor:
-    wlroots
-    labwc
-```
+### 31.2 Pins
 
-## 32. Automated Update Pull Requests
-
-Automated dependency updates shall generate focused pull requests.
-
-Preferred pattern:
+A temporary pin is a visible exception. It shall be recorded in `policy/tracking.toml` with a reason and an issue, and reported in every manifest:
 
 ```
-systemd update → one PR
-Linux update   → one PR
-graphics stack → one PR
-audio stack    → one PR
+mesa:
+    tracking: main
+    upstream_head: abcdef1
+    selected:      1234567
+    status: PINNED
+    reason: regression
+    issue: #493
 ```
 
-Large unrelated dependency batches shall be avoided.
+HEAD conformity (for example `7 / 8 at designated HEAD`) is a release metric. Target: no tracked component normally remains behind its designated branch for more than 24 hours.
 
-Each update PR should report:
+### 31.3 Layers
 
 ```
-old revision
-new revision
-upstream version/tag
-new kernel configuration symbols where relevant
+Layer 0   runner bootstrap        BuildStream, buildbox, builder VM/runner image,
+                                  BuildStream plugin junctions            pinned
+Layer 1   FDSDK bootstrap         compiler, libc, toolchain               via FDSDK master
+Layer 2   Beamline integration graph  FDSDK + tracked overrides + owned       tracked HEADs
+Layer 3   snapshot artifacts      SYSTEM images, UKIs, sysexts, manifest
+```
+
+Layer 0 is not part of the source graph. It stays pinned to known-good versions, changes deliberately, and is recorded as provenance. A BuildStream regression must never be confused with an upstream integration regression.
+
+### 31.4 Overrides
+
+An element override that tracks a component outside FDSDK's own selection is a copy of an FDSDK recipe. When a tracked FDSDK update changes the original recipe, the integration cycle shall fail until the override is re-copied from the new recipe. Drift is never allowed to accumulate silently.
+
+## 32. Integration Reporting
+
+Integration cycles replace per-component update pull requests.
+
+Each cycle shall report:
+
+```
+snapshot id and previous green snapshot
+per-component old and new commits, nearest tags
+HEAD conformity and pins
+new kernel configuration symbols
 build result
 boot result
 integration-test result
 ```
+
+When a cycle fails, the report shall identify which tracked inputs changed since the last green snapshot. Upstream breakage is then attributed visibly instead of being hidden.
 
 ## 33. Build and Artifact Caching
 
@@ -1366,125 +1450,40 @@ Loss of a CI cache shall cause slower builds, not broken builds.
 
 ## 34. Repository Layout
 
-Recommended initial structure:
+Structure (entries marked `later` arrive with their milestones):
 
 ```
-myos/
+beamline/
 ├── project.conf
-├── project.refs
-├── junction.refs
+├── project.refs              source pins (written by integration cycles)
+├── junction.refs             junction pins
+│
+├── include/
+│   ├── aliases.yml
+│   ├── snapshot.yml          snapshot identifier (dev outside integration)
+│   └── kernel/               shared kernel source and build rules
 │
 ├── elements/
-│   ├── junctions/
-│   │   └── freedesktop-sdk.bst
-│   │
-│   ├── base/
-│   │   ├── runtime.bst
-│   │   ├── systemd.bst
-│   │   ├── ipc.bst
-│   │   ├── security.bst
-│   │   ├── shell-compat.bst
-│   │   ├── os-release.bst
-│   │   └── base.bst
-│   │
-│   ├── overrides/
-│   │   ├── systemd.bst
-│   │   ├── mesa.bst
-│   │   └── pipewire.bst
-│   │
-│   ├── kernel/
-│   │   ├── linux-release.bst
-│   │   ├── linux-rc.bst
-│   │   ├── linux-main.bst
-│   │   ├── linux-hardware.bst
-│   │   └── linux-virt.bst
-│   │
-│   ├── profiles/
-│   │   ├── hardware.bst
-│   │   └── virt.bst
-│   │
-│   ├── desktop/
-│   │   ├── graphics.bst
-│   │   ├── wayland.bst
-│   │   ├── audio.bst
-│   │   ├── flatpak.bst
-│   │   ├── labwc.bst
-│   │   ├── lxqt.bst
-│   │   └── desktop.bst
-│   │
-│   ├── extensions/
-│   │   ├── desktop-tree.bst
-│   │   ├── desktop-sysext.bst
-│   │   ├── admin-tree.bst
-│   │   ├── admin-sysext.bst
-│   │   └── devel-sysext.bst
-│   │
-│   ├── image/
-│   │   ├── root-hardware.bst
-│   │   ├── root-virt.bst
-│   │   ├── initrd.bst
-│   │   ├── uki-hardware.bst
-│   │   ├── uki-virt.bst
-│   │   ├── disk-hardware.bst
-│   │   └── disk-virt.bst
-│   │
-│   └── tests/
-│       ├── boot-virt.bst
-│       ├── base-health.bst
-│       ├── desktop-health.bst
-│       └── sysupdate-health.bst
+│   ├── junctions/            freedesktop-sdk.bst, BuildStream plugin junctions
+│   ├── base/                 runtime, systemd, ipc, security, shell-compat, os-release, base
+│   ├── overrides/            FDSDK element overrides tracked at upstream HEAD (systemd, ...)
+│   ├── kernel/               linux-virt.bst, linux-hardware.bst (later), config.bst
+│   ├── profiles/             virt.bst, hardware.bst (later)
+│   ├── desktop/              later
+│   ├── extensions/           desktop/admin/devel sysexts (later)
+│   ├── image/                root, initrd, UKI and disk composition per profile
+│   └── tests/                tests that run inside BuildStream
 │
-├── files/
-│   ├── base/
-│   │   ├── os-release
-│   │   ├── tmpfiles.d/
-│   │   ├── sysusers.d/
-│   │   └── systemd/
-│   │
-│   ├── kernel/
-│   │   └── config/
-│   │       ├── common.config
-│   │       ├── hardware.config
-│   │       └── virt.config
-│   │
-│   ├── network/
-│   │   ├── networkd/
-│   │   └── NetworkManager/
-│   │
-│   ├── repart/
-│   ├── sysupdate/
-│   ├── desktop/
-│   ├── polkit/
-│   └── selinux/
-│
+├── files/                    OS configuration: base, network, kernel, repart, overrides, ...
 ├── policy/
-│   ├── components.toml
-│   └── kernel.toml
-│
-├── ci/
-│   ├── bootstrap
-│   ├── build
-│   ├── build-kernel
-│   ├── image
-│   ├── boot
-│   ├── test-base
-│   ├── test-desktop
-│   ├── test-sysupdate
-│   └── test-all
-│
-├── tools/
-│   ├── update-component.py
-│   ├── update-kernel.py
-│   ├── make-sysext.py
-│   ├── make-image.py
-│   └── qemu-test.py
-│
-└── .github/
-    └── workflows/
-        ├── pr.yml
-        ├── nightly.yml
-        ├── kernel-main.yml
-        └── release.yml
+│   ├── tracking.toml         designated branches, selection, pins
+│   └── unit-shell-allowlist.txt
+├── ci/                       bootstrap, check, build, build-kernel, image, boot,
+│                             test-base, test-all, integrate
+├── tools/                    integrate.py, qemu-test.py, check-policy.py, ...
+├── lima/                     builder VM definition
+├── docs/                     spec.md, release-model.md, decisions.md
+└── .github/workflows/        thin hosted orchestration
 ```
 
 Responsibility separation:
@@ -1497,13 +1496,13 @@ files/
     operating-system configuration
 
 policy/
-    source and release policy
+    source tracking and release policy
 
 ci/
-    portable build/test workflow
+    portable build/test/integration workflow
 
 tools/
-    maintenance automation
+    integration and maintenance automation
 
 .github/
     hosted runner orchestration
@@ -1511,9 +1510,7 @@ tools/
 
 ## 35. Bootstrap Strategy
 
-Initial development shall use a stable Freedesktop SDK release rather than immediately combining all bleeding-edge inputs.
-
-Initial sequence:
+Initial development shall use a stable Freedesktop SDK release rather than immediately combining all bleeding-edge inputs. Once the first image boots, inputs move to their tracked upstream HEADs (§31) one at a time.
 
 ```
 known-good FDSDK release
@@ -1526,26 +1523,25 @@ project-owned Virt kernel
         ↓
 UKI
         ↓
-EROFS
+inputs to tracked HEADs, one at a time:
+FDSDK master → Linux master → systemd main
+        ↓
+EROFS SYSTEM + DATA
         ↓
 desktop sysext
         ↓
 verity
         ↓
-A/B sysupdate
+A/B sysupdate + XBOOTLDR
         ↓
 Hardware profile
-        ↓
-newer systemd
-        ↓
-kernel RC/main
         ↓
 SELinux
         ↓
 homed
 ```
 
-Multiple experimental dimensions shall not be introduced simultaneously during bootstrap.
+Multiple experimental dimensions shall not be introduced simultaneously during bootstrap. This applies to structural changes to the repository; integration cycles move all tracked HEADs together by design.
 
 ## 36. Initial 0.0.1 Scope
 
@@ -1595,13 +1591,14 @@ A clean source checkout can produce a bootable AArch64 image inside the Linux bu
 Expected additions:
 
 ```
-EROFS root
+EROFS SYSTEM-A partition
+DATA partition (/var, /home)
 desktop directory sysext
 labwc graphical session
 PipeWire
 Wayland
 basic Flatpak support
-admin sysext
+admin sysext (uutils multicall)
 automated QEMU desktop test
 ```
 
@@ -1612,8 +1609,10 @@ Expected additions:
 ```
 desktop raw/EROFS sysext
 dm-verity
-A/B root layout
-systemd-sysupdate
+A/B SYSTEM layout
+XBOOTLDR with current and previous UKIs
+RECOVERY partition and RecoveryOS stub UKI
+systemd-sysupdate following a channel pointer
 rollback tests
 signed UKI development keys
 ```
@@ -1627,10 +1626,8 @@ Hardware profile
 NetworkManager
 linux-firmware
 broad hardware kernel
-x86-64 CI
-ARM64 CI
-kernel release/RC/main lanes
-component update automation
+x86-64 and ARM64 hosted integration cycles
+snapshot publication (GitHub Releases), latest-green pointer, retention
 ```
 
 ## 40. Later Security Milestones
@@ -1671,6 +1668,9 @@ Initial development shall not attempt:
 * immediate `systemd-homed` adoption;
 * immediate SELinux enforcement on physical hardware;
 * independent versioning of every sysext;
+* stable/testing/unstable source sets or per-package maturity policy;
+* maintained (backport) release branches before real demand exists;
+* forking the Freedesktop SDK bootstrap;
 * perfect support for all physical devices;
 * local x86-64 builds as the main Apple Silicon development path.
 
@@ -1693,7 +1693,7 @@ The following rules should remain stable unless strong evidence justifies revisi
 13. Administrative authority uses narrow privileged APIs.
 14. Recovery uses a separate signed environment.
 15. Kernel builds belong to the project.
-16. Kernel release, RC, and mainline channels remain distinct.
+16. Upstream version labels do not define release maturity; the complete image is the unit of integration, testing, promotion, rollback and support.
 17. CI runs locally before hosted execution.
 18. GitHub Actions does not contain the canonical build logic.
 19. AArch64 remains a first-class architecture.
@@ -1703,22 +1703,28 @@ The following rules should remain stable unless strong evidence justifies revisi
 23. Extension compatibility remains explicit and release-coupled.
 24. Security features add layers rather than replacing existing layers.
 25. Minimalism serves architectural clarity rather than minimum byte count.
+26. Designated upstream HEADs are tracked; pins are explicit, visible exceptions.
+27. A failed integration never publishes, and stale components are never substituted silently.
+28. Build tooling (Layer 0) stays pinned and outside the source graph.
+29. The initrd is project-owned and built from the image's own tree; dracut is not used.
+30. Coreutils shipped in any artifact are uutils, as a single multicall binary.
 
 ## 43. Summary Architecture
 
 ```
-                         UPSTREAM
-     Linux / systemd / Mesa / PipeWire / labwc / etc.
+                       UPSTREAM HEADs
+   FDSDK master / Linux master / systemd main / Mesa / labwc ...
                             │
-                            ▼
-                 FREEDESKTOP SDK
+                   integration cycle (§17)
                             │
-                   BuildStream junction
+              resolve → manifest → build → test
                             │
-              refs / selective overrides
-                            │
-                            ▼
-                      MYOS BASE
+                   ┌────────┴────────┐
+                 FAIL              GREEN SNAPSHOT
+               logs only             │
+                                     │  latest-green → edge → stable
+                                     ▼  (pointers; no rebuild)
+                      BEAMLINE BASE (on FDSDK + overrides)
       ┌──────────────────────────────────────┐
       │ systemd                              │
       │ glibc                                │
@@ -1727,7 +1733,7 @@ The following rules should remain stable unless strong evidence justifies revisi
       │ polkit                               │
       │ journald                             │
       │ sysupdate / sysext / repart          │
-      │ minimal /bin/sh                      │
+      │ minimal /bin/sh (dash)               │
       │ immutable root infrastructure        │
       └──────────────────────────────────────┘
                             │
@@ -1742,30 +1748,30 @@ The following rules should remain stable unless strong evidence justifies revisi
                │                         │
                └────────────┬────────────┘
                             │
-                  EROFS + dm-verity
+          SYSTEM-A / SYSTEM-B (EROFS + dm-verity)
                             │
-                        signed UKI
+           signed UKIs on XBOOTLDR, project-owned initrd
                             │
                    systemd-sysupdate
-                            │
-                 A/B immutable deployment
                             │
         ┌───────────────────┼───────────────────┐
         │                   │                   │
  desktop.sysext       admin.sysext        devel.sysext
-        │
+        │              (uutils)
    labwc / LXQt
    Wayland
    PipeWire
    Flatpak
                             │
-                     USER SESSION
+                 USER SESSION (DATA: /var, /home)
                             │
                   polkit / SELinux
                             │
                   privileged services
                             │
                        no root login
+
+  Separate, deliberately boring: RecoveryOS UKI + RECOVERY partition
 ```
 
-The resulting system shall resemble an appliance-oriented operating system internally while retaining the graphical usability and hardware flexibility expected from a modern Linux workstation.
+The resulting system shall resemble an appliance-oriented operating system internally while retaining the graphical usability and hardware flexibility expected from a modern Linux workstation. Every published system image is an immutable, reproducible snapshot of upstream HEADs that passed end-to-end OS integration testing.

@@ -6,8 +6,13 @@ enable dbus-broker.service
 enable systemd-networkd.service
 enable systemd-resolved.service
 enable systemd-timesyncd.service
-enable myos-boot-ok.service
+enable beamline-boot-ok.service
 
 # Not part of the base (docs/spec.md §5.2); FDSDK's audit package presets enable them.
 disable auditd.service
 disable audit-rules.service
+
+# Outside the current milestone (docs/spec.md §36): systemd-homed arrives after SELinux,
+# systemd-sysupdate at 0.0.3. Upstream presets enable parts of both.
+disable systemd-homed*
+disable systemd-sysupdate*

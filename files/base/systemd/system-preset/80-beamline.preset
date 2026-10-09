@@ -7,12 +7,24 @@ enable systemd-networkd.service
 enable systemd-resolved.service
 enable systemd-timesyncd.service
 enable beamline-boot-ok.service
+enable beamline-selinux-ok.service
+enable beamline-avc-report.service
+enable beamline-extensions-link.service
+enable beamline-extensions-start.service
+
+# Boot counting (docs/spec.md §16): a boot is good when boot-complete.target is reached,
+# which requires that no unit failed. systemd-bless-boot is pulled in by its generator.
+enable systemd-boot-check-no-failures.service
+
+# Human accounts are systemd-homed users (docs/spec.md §18.3, docs/decisions.md D54). The
+# first boot creates them from home.create.* credentials.
+enable systemd-homed.service
+enable systemd-homed-firstboot.service
+enable systemd-userdbd.socket
 
 # Not part of the base (docs/spec.md §5.2); FDSDK's audit package presets enable them.
 disable auditd.service
 disable audit-rules.service
 
-# Outside the current milestone (docs/spec.md §36): systemd-homed arrives after SELinux,
-# systemd-sysupdate at 0.0.3. Upstream presets enable parts of both.
-disable systemd-homed*
+# Updates run when asked (docs/decisions.md D52), not on a timer.
 disable systemd-sysupdate*

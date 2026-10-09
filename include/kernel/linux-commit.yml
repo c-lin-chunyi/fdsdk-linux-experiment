@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: MIT
+#
+# Selected Linux commit (docs/spec.md §11.2, docs/decisions.md D32): torvalds/linux.git
+# `master`, written by tools/integrate.py. The source is GitHub's archive of exactly this
+# commit; its sha256 is the ref in project.refs.
+
+variables:
+  linux-commit: af32da41b0327b9c6a37856ba82b6760d6c8d10e

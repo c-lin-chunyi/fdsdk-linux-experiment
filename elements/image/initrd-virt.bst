@@ -7,12 +7,16 @@ description: |
   runs initrd.target, mounts root= and switches root; no dracut hooks or shell scripts.
   The Virt kernel has its boot path built in, so no kernel modules are included.
 
+(@):
+- include/image/permissions.yml
+
 build-depends:
 - junctions/freedesktop-sdk.bst:public-stacks/runtime-gnu.bst
 - junctions/freedesktop-sdk.bst:components/cpio.bst
 - junctions/freedesktop-sdk.bst:components/findutils.bst
 - junctions/freedesktop-sdk.bst:components/systemd.bst
 - junctions/freedesktop-sdk.bst:components/zstd.bst
+- image/permissions.bst
 - filename: image/root-virt.bst
   config:
     location: /sysroot
@@ -39,10 +43,25 @@ config:
     # switch-root, so services failing here would also be refused in the host.
     rm -rf "${tree}/etc/systemd/system"
 
-    # The initrd has no first boot of its own: give it a complete user database now.
-    systemd-sysusers --root="${tree}"
-    # sysusers writes mode 0000; the unprivileged build sandbox must still read them to pack.
-    chmod 0400 "${tree}/etc/shadow" "${tree}/etc/gshadow"
+    # /etc's mutable layer on DATA is reduced to the allowlist and merged into /sysroot/etc
+    # before switch-root, so PID 1 reads the final /etc (docs/decisions.md D56). The units are
+    # inert in the host.
+    install -d "${tree}/usr/lib/systemd/system/initrd.target.wants"
+    ln -s ../systemd-confext-sysroot.service \
+      "${tree}/usr/lib/systemd/system/initrd.target.wants/systemd-confext-sysroot.service"
+
+    # DATA, its bind mounts and its growth belong to the host, after switch-root
+    # (docs/spec.md §15); the initrd only mounts root= at /sysroot.
+    rm -rf "${tree}/etc/fstab" "${tree}/usr/lib/repart.d"
+
+    # cpio carries no labels, so the policy stays out of the initrd; systemd loads it in
+    # the host after switch-root (docs/security.md §19.1).
+    rm -rf "${tree}/etc/selinux"
+
+    # The user database comes complete from the root (image/root-virt.bst runs sysusers);
+    # its file modes do not survive the artifact (docs/decisions.md D31).
+    %{apply-permissions}
+    apply_permissions "${tree}"
 
     # systemd recognises an initrd by /etc/initrd-release and starts from /init.
     rm -f "${tree}/etc/initrd-release"

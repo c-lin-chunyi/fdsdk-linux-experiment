@@ -1,0 +1,91 @@
+# SPDX-License-Identifier: MIT
+#
+# Building a system extension image and its configuration extension image (docs/spec.md §8,
+# docs/decisions.md D36). An extension element sets %{extension-name} and stages:
+#   /tree               the base and the extension, composed and integrated together
+#   /base               the finished root (image/root-virt.bst)
+#   /reference/content  the extension's content stack (its closure)
+#   /reference/tools    the integration toolbox, which is never extension content
+# It produces <name>.sysext.raw (/usr, /opt) and, when there is /etc content,
+# <name>.confext.raw: disk images holding EROFS labelled from the base policy's file contexts,
+# a dm-verity hash tree, and a signature over its root hash made with the development verity
+# key (docs/decisions.md D50). The level is the snapshot identifier (docs/spec.md §8), so an
+# image merges only into the SYSTEM built with it. The element build-depends on systemd,
+# image/repart-extension.bst and security/keys-verity.bst.
+# %{extension-presets} true applies system and user presets to a copy of the merged tree
+# first, so unit enablement ships in the confext.
+
+(@):
+- include/image/permissions.yml
+
+variables:
+  strip-binaries: ''
+  extension-level: '%{snapshot-id}'
+  verity-keys: '%{datadir}/%{os-id}/keys/verity'
+  image-tools: '%{libexecdir}/%{os-id}-image-tools'
+  # Removed or replaced in the root by policy (image/root-virt.bst), so never shipped beside
+  # it: su, pkexec (decisions D55), and systemd's vendor update keyring (decisions D52).
+  extension-exclude: >-
+    --exclude /usr/bin/su --exclude /etc/pam.d/su --exclude /etc/pam.d/su-l
+    --exclude %{bindir}/pkexec
+    --exclude %{indep-libdir}/systemd/import-pubring.pgp
+  # Caches built from the merged tree, shadowing the base's while merged.
+  extension-regenerated: >-
+    --regenerated /etc/ld.so.cache
+  extension-presets: 'false'
+  (?):
+  - arch == "aarch64":
+      extension-arch: arm64
+  - arch == "x86_64":
+      extension-arch: x86-64
+
+environment:
+  SOURCE_DATE_EPOCH: '%{source-date-epoch}'
+
+config:
+  commands:
+  - |
+    tree=/tree
+    if [ "%{extension-presets}" = true ]; then
+      mkdir -p /work
+      cp -a /tree /work/merged
+      systemctl --root=/work/merged preset-all
+      systemctl --root=/work/merged --global preset-all
+      tree=/work/merged
+    fi
+    python3 "%{image-tools}/build-extension.py" --name "%{extension-name}" \
+      --tree "${tree}" --base /base --content-tree /reference/content \
+      --exclude-tree /reference/tools %{extension-exclude} \
+      %{extension-regenerated} \
+      --os-id "%{os-id}" --level "%{extension-level}" --architecture "%{extension-arch}" \
+      --out /work
+
+  - |
+    %{apply-permissions}
+    trees=""
+    for kind in sysext confext; do
+      if [ -d "/work/${kind}" ]; then apply_permissions "/work/${kind}"; trees="${trees} /work/${kind}"; fi
+    done
+    python3 "%{image-tools}/check-policy.py" --artifact ${trees}
+
+  - |
+    mkdir -p /work/tmp
+    for kind in sysext confext; do
+      [ -d "/work/${kind}" ] || continue
+      # Seeded from the image's own UUID, so the partition UUIDs repart does not derive from
+      # the root hash are reproducible.
+      TMPDIR=/work/tmp \
+      SYSTEMD_REPART_MKFS_OPTIONS_EROFS=--file-contexts=/base/etc/selinux/beamline/contexts/files/file_contexts \
+      systemd-repart \
+        --offline=yes \
+        --dry-run=no \
+        --empty=create \
+        --size=auto \
+        --seed="$(cat "/work/uuid-${kind}")" \
+        --definitions="%{datadir}/%{os-id}/repart/extension" \
+        --copy-source="/work/${kind}" \
+        --private-key="%{verity-keys}/verity.key" \
+        --certificate="%{verity-keys}/verity.crt" \
+        "%{install-root}/%{extension-name}.${kind}.raw"
+    done
+    ls -la "%{install-root}"

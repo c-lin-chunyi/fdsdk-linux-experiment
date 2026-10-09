@@ -5,4 +5,6 @@ projects:
     junctions/buildstream-plugins-community.bst:
     - ref: 28ccf91c48044ea2889b2dc2a5b5644e5e625479d87a8feb7214a4d1bfd6179a
     junctions/freedesktop-sdk.bst:
-    - ref: freedesktop-sdk-26.08rc.2-353-gc67967f99ce9aafd75bf5b3091f5d2da094bdd61
+    - ref: freedesktop-sdk-26.08rc.2-355-g809013202493a2676672959850587e5013ae59e4
+    junctions/gnome-build-meta.bst:
+    - ref: 49-branchpoint-1329-g4c34fc4efb47d8fdaf2e038d5dbdf997e85bda12

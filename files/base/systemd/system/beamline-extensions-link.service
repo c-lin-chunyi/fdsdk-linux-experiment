@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: MIT
+#
+# Link the extensions merged at boot (desktop-gnome) from DATA into the extension search
+# paths, in the version built with this SYSTEM (docs/spec.md §8, docs/decisions.md D50). DATA
+# keeps each snapshot's images under their own names, so after a rollback the older SYSTEM
+# finds its own. %A is this image's IMAGE_VERSION.
+
+[Unit]
+Description=Link the extensions of this snapshot
+DefaultDependencies=no
+After=local-fs.target
+Before=systemd-sysext.service systemd-confext.service sysinit.target
+ConditionPathExists=/var/lib/beamline/extensions/desktop-gnome_%A.raw
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/systemd-tmpfiles --create --inline "L /run/extensions/desktop-gnome.raw - - - - /var/lib/beamline/extensions/desktop-gnome_%A.raw" "L /run/confexts/desktop-gnome.raw - - - - /var/lib/beamline/confexts/desktop-gnome_%A.raw"
+
+[Install]
+WantedBy=sysinit.target

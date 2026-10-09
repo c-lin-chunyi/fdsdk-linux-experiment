@@ -3,6 +3,10 @@
 > Design rationale for the release model in [spec.md](spec.md) §16, §17 and §31, kept verbatim as
 > written by the project owner. Where this text explores alternatives, the spec states what was chosen.
 > It predates the name: "MyOS" and `myos` below mean Beamline.
+>
+> It also predates spec revision 6, which renamed `latest-green` to `latest` and dropped the
+> `stable` channel. The channels are `latest` and `edge`, plus checkpoints; the text below
+> keeps the names it was written with.
 
 
 

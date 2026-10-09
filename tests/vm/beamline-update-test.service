@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: MIT
+#
+# VM test (ci/test-update, docs/spec.md §16, docs/decisions.md D52): upgrade from the
+# snapshot `latest` to the candidate with systemd-sysupdate, then roll back. Runs on every
+# boot; the versions come as credentials (beamline.test.old, beamline.test.new).
+#   old, before the update: write a marker to DATA, update, reboot
+#   new: the marker is still there, the new extensions are installed and admin merges;
+#        beamline-update-fail.service then fails this boot, until boot counting gives up
+#   old, after the update: the rollback happened, and the marker is still there
+# Injected through a systemd.extra-unit credential; never part of an image, so it may use dash.
+
+[Unit]
+Description=Upgrade to the candidate snapshot, then roll back
+ConditionPathExists=!/etc/initrd-release
+Wants=network-online.target
+After=beamline-boot-ok.service network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+StandardOutput=journal+console
+ImportCredential=beamline.test.*
+# The harness lets boots fail on purpose here; this marker tells it the test itself failed.
+ExecStopPost=/usr/bin/sh -c '[ "$SERVICE_RESULT" = success ] || echo BEAMLINE_UPDATE_TEST_FAILED'
+ExecStart=/usr/bin/sh -c 'set -eu; . /usr/lib/os-release; read -r old < "$CREDENTIALS_DIRECTORY/beamline.test.old" || [ -n "$old" ]; read -r new < "$CREDENTIALS_DIRECTORY/beamline.test.new" || [ -n "$new" ]; state=/var/lib/beamline-test; echo "booted $IMAGE_VERSION (old $old, new $new)"; if [ "$IMAGE_VERSION" = "$old" ] && [ -e "$state/updated" ]; then [ -e "$state/marker" ]; echo BEAMLINE_ROLLED_BACK; elif [ "$IMAGE_VERSION" = "$old" ]; then systemd-tmpfiles --create --inline "d $state 0755 - - -" "f $state/marker 0644 - - - kept"; /usr/lib/systemd/systemd-sysupdate update; : > "$state/updated"; systemctl --no-block reboot; elif [ "$IMAGE_VERSION" = "$new" ]; then bootctl list --no-pager || true; [ -e "$state/marker" ]; [ -e "/var/lib/beamline/extensions/desktop-gnome_$new.raw" ]; [ -e "/var/lib/beamline/extensions/desktop-gnome_$old.raw" ]; systemctl start beamline-admin.service; bash --version >/dev/null; echo BEAMLINE_UPDATED_OK; else echo "unexpected version $IMAGE_VERSION"; exit 1; fi'

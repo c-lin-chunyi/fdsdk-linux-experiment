@@ -6,7 +6,7 @@
 
 [Unit]
 Description=Report boot success on the console
-After=multi-user.target
+After=multi-user.target beamline-selinux-ok.service beamline-avc-report.service
 
 [Service]
 Type=oneshot

@@ -2,8 +2,11 @@
 # SPDX-License-Identifier: MIT
 """Static policy checks for Beamline trees and unit files (docs/spec.md §2.1, §6, §18.1).
 
-  --units DIR...   Reject shell constructs in Exec*= lines of unit files.
-  --tree SYSROOT   Reject bash, su/sudo, package managers and a non-dash /usr/bin/sh.
+  --units DIR...      Reject shell constructs in Exec*= lines of unit files.
+  --tree SYSROOT      The base root: reject bash, su/sudo/pkexec/doas, package managers and a non-dash
+                      /usr/bin/sh; also apply the --artifact rules.
+  --artifact TREE...  Any final artifact (root, extension): reject su/sudo/pkexec/doas, package managers,
+                      dracut, GNU coreutils binaries (§7.2) and web engines (§7.1).
 
 Standard library only: this runs on macOS, in the builder VM and inside BuildStream.
 """
@@ -29,9 +32,18 @@ SHELL_CONSTRUCTS = [
 
 UNIT_SUFFIXES = (".service", ".socket", ".timer", ".path", ".mount", ".target")
 
+# docs/spec.md §7.1, docs/decisions.md D29: no web engine or web JavaScript engine.
+WEB_ENGINE = re.compile(r"^(libwebkit\S*gtk\S*\.so.*|libjavascriptcoregtk\S*\.so.*|"
+                        r"(WebKit|WebKit2|JavaScriptCore)(WebExtension)?-[\d.]+\.typelib|jsc)$")
+# docs/spec.md §7.2: shipped coreutils are uutils. GNU binaries carry this in --version;
+# uutils' multicall binary also mentions it (in help texts), alongside its own name.
+GNU_COREUTILS_MARK = b"GNU coreutils"
+UUTILS_MARK = b"uutils"
+
 FORBIDDEN_BINARIES = [
-    # Shell policy (docs/spec.md §6) and root identity (§18.1)
-    "bash", "su", "sudo",
+    # Shell policy (docs/spec.md §6) and root identity (§18.1, §19: run0 is the only
+    # escalation); bash is base-only
+    "bash", "su", "sudo", "pkexec", "doas",
     # The initrd is project-owned (§13)
     "dracut",
     # Package managers and out-of-tree module builds (§2.1)
@@ -100,8 +112,31 @@ def check_units(roots, allowlist):
     return problems
 
 
-def check_tree(sysroot):
+def check_artifact(tree):
     problems = []
+    for bindir in ("usr/bin", "usr/sbin", "usr/local/bin"):
+        for name in FORBIDDEN_BINARIES:
+            if name != "bash" and os.path.lexists(os.path.join(tree, bindir, name)):
+                problems.append(f"{os.path.join(tree, bindir, name)}: must not be in any artifact")
+    for dirpath, _dirnames, filenames in os.walk(tree):
+        for name in filenames:
+            path = os.path.join(dirpath, name)
+            if WEB_ENGINE.match(name):
+                problems.append(f"{path}: web engine (docs/spec.md §7.1)")
+            rel = os.path.relpath(dirpath, tree)
+            if rel in ("usr/bin", "usr/sbin") and not os.path.islink(path) and os.path.isfile(path):
+                with open(path, "rb") as f:
+                    data = f.read()
+                # Only programs: scripts such as xz's xzdiff mention GNU coreutils in prose.
+                if data[:4] != b"\x7fELF":
+                    continue
+                if GNU_COREUTILS_MARK in data and not (name == "coreutils" and UUTILS_MARK in data):
+                    problems.append(f"{path}: GNU coreutils (shipped coreutils are uutils, §7.2)")
+    return problems
+
+
+def check_tree(sysroot):
+    problems = check_artifact(sysroot)
     for bindir in ("usr/bin", "usr/sbin", "usr/local/bin"):
         for name in FORBIDDEN_BINARIES:
             candidate = os.path.join(sysroot, bindir, name)
@@ -125,17 +160,21 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--units", nargs="+", default=[], metavar="DIR", help="unit directories to scan")
     parser.add_argument("--tree", metavar="SYSROOT", help="composed root filesystem to check")
+    parser.add_argument("--artifact", nargs="+", default=[], metavar="TREE",
+                        help="other final artifact trees (extensions) to check")
     parser.add_argument("--allowlist", metavar="FILE", help="unit file names exempt from the shell rule")
     args = parser.parse_args()
 
-    if not args.units and not args.tree:
-        parser.error("nothing to check: pass --units and/or --tree")
+    if not args.units and not args.tree and not args.artifact:
+        parser.error("nothing to check: pass --units, --tree and/or --artifact")
 
     problems = []
     if args.units:
         problems += check_units(args.units, load_allowlist(args.allowlist))
     if args.tree:
         problems += check_tree(args.tree)
+    for tree in args.artifact:
+        problems += check_artifact(tree)
 
     for problem in problems:
         print(f"policy: {problem}", file=sys.stderr)

@@ -25,3 +25,14 @@ mounts: []
 containerd:
   system: false
   user: false
+
+# One clock discipline only (docs/decisions.md D40). Lima's guest agent keeps the guest
+# clock on the host's; chronyd fighting it set a 7% tick correction, and the agent's
+# backwards steps every few seconds made freshly written files look newer than the clock
+# (meson "clock skew", automake "newly created file is older than distributed files").
+provision:
+- mode: system
+  script: |
+    #!/bin/sh
+    set -eu
+    systemctl disable --now chronyd.service 2>/dev/null || true

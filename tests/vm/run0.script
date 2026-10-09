@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: MIT
+#
+# VM test (ci/test-run0; docs/spec.md §18.1, §19; docs/decisions.md D55), on the serial
+# console: run0 is the only escalation, polkit decides who, and run0 sessions run in admin_t.
+#   dev (wheel)   run0 asks for dev's own password; the command runs as root in admin_t
+#                 run0 without a command: the caller's shell runs as root, also in admin_t
+#                 (polkit keeps an authorization only for the same requesting process, so
+#                 run0 asks again)
+#   alice         run0 and update authorization are refused without a prompt
+#   root          console login fails: the account is locked
+# Patterns that the terminal's echo of a typed command could match require text the echo
+# does not contain. Never part of an image.
+
+expect localhost login:
+send dev\n
+expect Password:
+send dev\n
+expect \$ 
+send run0 /usr/bin/sh -c 'read -r c < /proc/self/attr/current; echo "RUN0_CONTEXT=$c"; while read -r k v r; do [ "$k" = Uid: ] && echo "RUN0_UID=$v"; done < /proc/self/status'\n
+expect Password:
+send dev\n
+expect RUN0_UID=0
+expect \$ 
+send run0\n
+expect Password:
+send dev\n
+expect # 
+send read -r c < /proc/self/attr/current; echo "RUN0_SHELL_CONTEXT=$c"; exit\n
+expect RUN0_SHELL_CONTEXT=admin_u:admin_r:admin_t
+expect \$ 
+send exit\n
+
+expect localhost login:
+send alice\n
+expect Password:
+send alice\n
+expect \$ 
+send run0 /usr/bin/sh -c 'echo RUN0_RAN_FOR_ALICE'\n
+expect Access denied
+expect \$ 
+send pkcheck --action-id org.freedesktop.sysupdate1.update --process $$ && echo PK_ALLOWED || echo "PK_DENIED=$?"\n
+expect PK_DENIED=[0-9]
+expect \$ 
+send exit\n
+
+expect localhost login:
+send root\n
+expect Password:
+send anything\n

@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: MIT
+#
+# VM test (ci/test-desktop, docs/spec.md §29, §30): in the GNOME session dev signed into
+# through GDM, GNOME Shell owns its bus name, PipeWire and WirePlumber run, the portal answers
+# (it is D-Bus activated), and an unprivileged Flatpak sandbox (bubblewrap) starts. Injected through a systemd.extra-unit
+# credential; never part of an image.
+
+[Unit]
+Description=Check the GNOME session
+# Skipped, not failed, until the session exists; the timer tries again.
+ConditionPathExists=/run/user/60001/bus
+
+[Service]
+Type=oneshot
+# Stay active, or the timer starts the check again.
+RemainAfterExit=yes
+User=dev
+Environment=XDG_RUNTIME_DIR=/run/user/60001
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/60001/bus
+TimeoutStartSec=600
+StandardOutput=journal+console
+StandardError=journal+console
+ExecStart=/usr/bin/gdbus wait --session --timeout 480 org.gnome.Shell
+ExecStart=/usr/bin/systemctl --user is-active pipewire.service wireplumber.service
+ExecStart=/usr/bin/gdbus call --session --dest org.freedesktop.portal.Desktop --object-path /org/freedesktop/portal/desktop --method org.freedesktop.DBus.Peer.Ping
+ExecStart=/usr/bin/flatpak --version
+ExecStart=/usr/bin/bwrap --unshare-all --ro-bind /usr /usr --symlink usr/lib /lib --symlink usr/bin /bin --proc /proc --dev /dev /usr/bin/sh -c exit
+ExecStart=/usr/bin/systemd-escape BEAMLINE_DESKTOP_OK

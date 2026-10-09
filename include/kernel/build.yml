@@ -43,6 +43,7 @@ variables:
   kernel-base: defconfig
   kernel-config-fragments: >-
     %{kernel-config-dir}/common.config
+    %{kernel-config-dir}/security.config
     %{kernel-config-dir}/arch-%{kernel-arch}.config
     %{kernel-config-dir}/%{kernel-profile}.config
 

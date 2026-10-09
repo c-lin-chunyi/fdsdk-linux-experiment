@@ -7,3 +7,6 @@ github: https://github.com/
 kernel: https://git.kernel.org/pub/scm/
 kernel_files: https://cdn.kernel.org/pub/
 pypi: https://files.pythonhosted.org/packages/
+crates: https://static.crates.io/
+gnome_gitlab: https://gitlab.gnome.org/
+gnome: https://gitlab.gnome.org/GNOME/

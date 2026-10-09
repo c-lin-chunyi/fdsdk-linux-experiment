@@ -7,17 +7,19 @@ system, separate Hardware and Virt profiles, and desktop/admin/devel tooling del
 system extensions.
 
 - Specification: [docs/spec.md](docs/spec.md)
+- Security architecture (normative annex): [docs/security.md](docs/security.md)
 - Decisions and deviations: [docs/decisions.md](docs/decisions.md)
 - Working in this repo (people and agents): [AGENTS.md](AGENTS.md)
 
 Releases are **snapshots of upstream HEADs**. An integration cycle resolves FDSDK `master`,
 Linux `master`, systemd `main` and the other tracked components to exact commits. It then
 builds and boots the whole image, and publishes it only if everything is green.
-`latest-green`, `edge` and `stable` are pointers to those immutable snapshots
+`latest` and `edge` are pointers to those immutable snapshots
 ([release model](docs/release-model.md), spec §17).
 
-Status: 0.0.1 done (a bootable AArch64 Virt image under QEMU), with every tracked input at
-its upstream HEAD.
+Status: 0.0.2 done (a read-only EROFS root with DATA, SELinux permissive with a project
+policy, the admin and desktop-gnome extensions), with every tracked input at its upstream
+HEAD. 0.0.3 is in progress: verified boot, A/B updates, homed and SELinux enforcing.
 
 ## Quick start (Apple Silicon macOS)
 

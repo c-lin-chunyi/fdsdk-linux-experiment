@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: MIT
+#
+# VM test (ci/test-extensions): merge the admin extension and use it. Injected through a
+# systemd.extra-unit credential; never part of an image.
+
+[Unit]
+Description=Check the admin system extension
+Requires=beamline-admin.service
+After=beamline-admin.service beamline-boot-ok.service
+
+[Service]
+Type=oneshot
+StandardOutput=journal+console
+ExecStart=/usr/bin/bash --version
+ExecStart=/usr/bin/ls --version
+ExecStart=/usr/bin/systemd-escape BEAMLINE_ADMIN_OK

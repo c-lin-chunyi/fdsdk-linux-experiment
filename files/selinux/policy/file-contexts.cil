@@ -1,0 +1,56 @@
+; SPDX-License-Identifier: MIT
+;
+; File contexts (docs/security.md §19.1). They label SYSTEM and the extension images when
+; mkfs.erofs creates them, and DATA when systemd creates or relabels files at runtime.
+; Later, more specific entries win, as in any file_contexts.
+
+(context sys (system_u object_r default_t ((s0) (s0))))
+
+(filecon "/" dir (system_u object_r root_t ((s0) (s0))))
+(filecon "/.*" any sys)
+
+; SYSTEM: /usr and /etc
+(filecon "/usr(/.*)?" any (system_u object_r usr_t ((s0) (s0))))
+(filecon "/usr/s?bin(/.*)?" any (system_u object_r bin_t ((s0) (s0))))
+(filecon "/usr/libexec(/.*)?" any (system_u object_r bin_t ((s0) (s0))))
+(filecon "/usr/lib/systemd/systemd" file (system_u object_r init_exec_t ((s0) (s0))))
+(filecon "/etc(/.*)?" any (system_u object_r etc_t ((s0) (s0))))
+(filecon "/etc/g?shadow" file (system_u object_r shadow_t ((s0) (s0))))
+(filecon "/etc/selinux(/.*)?" any (system_u object_r selinux_config_t ((s0) (s0))))
+; The allowlisted system settings of /etc's mutable layer (docs/decisions.md D56)
+(filecon "/etc/hostname" any (system_u object_r hostname_etc_t ((s0) (s0))))
+(filecon "/etc/machine-info" any (system_u object_r hostname_etc_t ((s0) (s0))))
+(filecon "/etc/localtime" any (system_u object_r timezone_etc_t ((s0) (s0))))
+(filecon "/etc/adjtime" any (system_u object_r timezone_etc_t ((s0) (s0))))
+(filecon "/etc/locale.conf" any (system_u object_r locale_etc_t ((s0) (s0))))
+(filecon "/etc/vconsole.conf" any (system_u object_r locale_etc_t ((s0) (s0))))
+(filecon "/etc/machine-id" any (system_u object_r machine_id_etc_t ((s0) (s0))))
+(filecon "/efi(/.*)?" any (system_u object_r boot_t ((s0) (s0))))
+
+; DATA and its bind mounts
+(filecon "/data" dir (system_u object_r data_t ((s0) (s0))))
+(filecon "/data/var" dir (system_u object_r var_t ((s0) (s0))))
+(filecon "/data/home" dir (system_u object_r home_root_t ((s0) (s0))))
+(filecon "/data/lost.found(/.*)?" any (system_u object_r data_t ((s0) (s0))))
+(filecon "/var(/.*)?" any (system_u object_r var_t ((s0) (s0))))
+(filecon "/var/log(/.*)?" any (system_u object_r var_log_t ((s0) (s0))))
+(filecon "/var/lib(/.*)?" any (system_u object_r var_lib_t ((s0) (s0))))
+(filecon "/var/tmp(/.*)?" any (system_u object_r tmp_t ((s0) (s0))))
+; /etc's mutable layer on DATA: the allowlisted files, relabelled by path after the initrd
+; rebuilt the layer (docs/decisions.md D56)
+(filecon "/var/lib/extensions.mutable/etc/hostname" any (system_u object_r hostname_etc_t ((s0) (s0))))
+(filecon "/var/lib/extensions.mutable/etc/machine-info" any (system_u object_r hostname_etc_t ((s0) (s0))))
+(filecon "/var/lib/extensions.mutable/etc/localtime" any (system_u object_r timezone_etc_t ((s0) (s0))))
+(filecon "/var/lib/extensions.mutable/etc/adjtime" any (system_u object_r timezone_etc_t ((s0) (s0))))
+(filecon "/var/lib/extensions.mutable/etc/locale.conf" any (system_u object_r locale_etc_t ((s0) (s0))))
+(filecon "/var/lib/extensions.mutable/etc/vconsole.conf" any (system_u object_r locale_etc_t ((s0) (s0))))
+(filecon "/var/lib/extensions.mutable/etc/machine-id" any (system_u object_r machine_id_etc_t ((s0) (s0))))
+(filecon "/home" dir (system_u object_r home_root_t ((s0) (s0))))
+(filecon "/home/[^/]+" dir (system_u object_r user_home_dir_t ((s0) (s0))))
+(filecon "/home/[^/]+/.+" any (system_u object_r user_home_t ((s0) (s0))))
+
+; Runtime state and devices (tmpfs, devtmpfs)
+(filecon "/tmp(/.*)?" any (system_u object_r tmp_t ((s0) (s0))))
+(filecon "/run(/.*)?" any (system_u object_r run_t ((s0) (s0))))
+(filecon "/dev(/.*)?" any (system_u object_r device_t ((s0) (s0))))
+(filecon "/dev/null" char (system_u object_r null_device_t ((s0) (s0))))

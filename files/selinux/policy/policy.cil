@@ -1,0 +1,180 @@
+; SPDX-License-Identifier: MIT
+;
+; Beamline SELinux policy, Stage 0 (docs/security.md §7, §16; docs/decisions.md D35).
+; Written from scratch in CIL. Classes, initial SIDs and MCS categories come from the
+; kernel (kernel.cil, generated at build time).
+;
+; Stage 0 is permissive and records AVC denials. Unknown classes are allowed until
+; Stage 1, which declares the full kernel class map in use and denies unknowns.
+
+(handleunknown allow)
+(mls true)
+
+(policycap open_perms)
+(policycap extended_socket_class)
+(policycap network_peer_controls)
+(policycap cgroup_seclabel)
+(policycap nnp_nosuid_transition)
+(policycap genfs_seclabel_symlinks)
+
+; --- Integrity levels (docs/security.md §3) -----------------------------------------
+;
+; P3 platform, P2 delegated administration (run0 sessions), P0 arbitrary user code. P1
+; (restricted applications) arrives with the applications that need it.
+
+(typeattribute beamline_domain)
+(typeattribute beamline_platform_domain)       ; P3
+(typeattribute beamline_admin_domain)          ; P2
+(typeattribute beamline_user_domain)           ; P0
+(typeattribute beamline_file_type)
+(typeattribute beamline_platform_exec_type)    ; executables endorsed as P3
+(typeattribute beamline_any_type)
+(typeattributeset beamline_any_type (all))
+
+; --- Users and roles ------------------------------------------------------------------
+
+(role object_r)                                ; files and other objects
+(roletype object_r beamline_any_type)
+(role system_r)
+(role user_r)
+(roleallow system_r user_r)
+; run0 sessions (docs/security.md §9.4, docs/decisions.md D55): root's PAM sessions map to
+; admin_u (seusers), and run0's session enters admin_r:admin_t (default_contexts).
+(role admin_r)
+(roleallow system_r admin_r)
+
+(user system_u)
+(userrole system_u system_r)
+(userrole system_u object_r)
+(userlevel system_u (s0))
+(userrange system_u ((s0) (s0 (range c0 c1023))))
+
+(user user_u)
+(userrole user_u user_r)
+(userlevel user_u (s0))
+(userrange user_u ((s0) (s0 (range c0 c1023))))
+
+(user admin_u)
+(userrole admin_u admin_r)
+(userlevel admin_u (s0))
+(userrange admin_u ((s0) (s0 (range c0 c1023))))
+
+; --- Domains --------------------------------------------------------------------------
+
+(type kernel_t)
+(type init_t)
+(type user_t)
+(type admin_t)
+(roletype system_r kernel_t)
+(roletype system_r init_t)
+(roletype user_r user_t)
+(roletype admin_r admin_t)
+(typeattributeset beamline_platform_domain (kernel_t init_t))
+(typeattributeset beamline_admin_domain (admin_t))
+(typeattributeset beamline_user_domain (user_t))
+(typeattributeset beamline_domain (beamline_platform_domain beamline_admin_domain beamline_user_domain))
+
+; systemd loads the policy as the kernel's first process and re-executes itself, entering
+; init_t. Every service it starts stays in init_t until Stage 1 gives services domains.
+(type init_exec_t)
+(typetransition kernel_t init_exec_t process init_t)
+(typeattributeset beamline_platform_exec_type (init_exec_t))
+
+; --- Files ----------------------------------------------------------------------------
+
+; SYSTEM (immutable, labelled when the image is built)
+(type root_t)
+(type default_t)
+(type usr_t)
+(type bin_t)
+(type etc_t)
+(type shadow_t)
+(type selinux_config_t)
+(type boot_t)
+
+; DATA (mutable, labelled at runtime)
+(type data_t)
+(type var_t)
+(type var_log_t)
+(type var_lib_t)
+(type home_root_t)
+(type user_home_dir_t)
+(type user_home_t)
+(type tmp_t)
+
+; Runtime and kernel filesystems
+(type run_t)
+(type tmpfs_t)
+(type device_t)
+(type null_device_t)
+(type devpts_t)
+(type unlabeled_t)
+(type fs_t)
+(type proc_t)
+(type sysfs_t)
+(type security_t)
+(type securityfs_t)
+(type cgroup_t)
+(type efivarfs_t)
+(type bpf_t)
+(type debugfs_t)
+(type tracefs_t)
+(type pstore_t)
+(type configfs_t)
+(type fusefs_t)
+(type binfmt_misc_t)
+(type mqueue_t)
+(type hugetlbfs_t)
+(type autofs_t)
+(type nsfs_t)
+(type port_t)
+(type netif_t)
+(type node_t)
+
+(typeattributeset beamline_file_type (root_t default_t usr_t bin_t etc_t shadow_t
+    selinux_config_t boot_t init_exec_t data_t var_t var_log_t var_lib_t home_root_t
+    user_home_dir_t user_home_t tmp_t run_t beamline_etc_setting_type))
+
+; Scoped mutable /etc (docs/spec.md §14, docs/decisions.md D56). systemd-confext's mutable
+; layer makes /etc writable on DATA; the initrd reduces it to the allowlist before every merge,
+; and the labels decide what may change at runtime. The allowlisted system settings have their
+; own types; the systemd services that write them label new files from these contexts. Every
+; other /etc file, like all of /usr, is immutable: no domain may create, write, rename or
+; remove it.
+(typeattribute beamline_etc_setting_type)
+(type hostname_etc_t)                          ; /etc/hostname, /etc/machine-info
+(type timezone_etc_t)                          ; /etc/localtime, /etc/adjtime
+(type locale_etc_t)                            ; /etc/locale.conf, /etc/vconsole.conf
+(type machine_id_etc_t)                        ; /etc/machine-id
+(typeattributeset beamline_etc_setting_type (hostname_etc_t timezone_etc_t locale_etc_t
+    machine_id_etc_t))
+
+(typeattribute beamline_immutable_file_type)
+(typeattributeset beamline_immutable_file_type (usr_t bin_t init_exec_t etc_t shadow_t
+    selinux_config_t))
+(typeattribute beamline_mutable_type)
+(typeattributeset beamline_mutable_type (and beamline_any_type (not beamline_immutable_file_type)))
+
+; --- Stage 0 rules --------------------------------------------------------------------
+;
+; Platform domains get every permission of every class (kernel.cil) except the security
+; class, which they get without setenforce, load_policy and the other policy-changing
+; permissions. User and admin domains get no rules yet: their denials are what Stage 1
+; designs.
+
+(allow beamline_platform_domain security_t (security (compute_av compute_create
+    compute_member check_context compute_relabel compute_user read_policy validate_trans)))
+
+; Any object type may exist on any filesystem. Stage 1 narrows this to the filesystems each
+; type belongs on.
+(allow beamline_any_type beamline_any_type (filesystem (associate)))
+
+; Nothing may switch enforcement or load a policy at runtime. A recovery domain is the
+; only future exception (docs/security.md §7.3).
+(neverallow beamline_domain beamline_any_type (security (setenforce load_policy)))
+
+; Nothing may change SYSTEM's immutable files, in /etc's mutable layer or anywhere else
+; (docs/spec.md §14, docs/decisions.md D56).
+(neverallow beamline_domain beamline_immutable_file_type (file (create write append unlink rename link setattr relabelfrom)))
+(neverallow beamline_domain beamline_immutable_file_type (lnk_file (create write append unlink rename link setattr relabelfrom)))
+(neverallow beamline_domain beamline_immutable_file_type (dir (create rmdir rename reparent setattr relabelfrom)))

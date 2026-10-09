@@ -1,0 +1,25 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+#
+# Desktop test on the checked-out Virt image (docs/spec.md §29, §30): boot with a 2D
+# virtio-gpu, sign dev in at the GDM greeter with keystrokes (homed needs the password; the
+# greeter lists Alice first, then Developer), and check GNOME Shell, PipeWire,
+# WirePlumber, the portal and a Flatpak sandbox; then capture the screen and fail if it is
+# blank. The image itself is never modified.
+#   ./ci/test-desktop [path/to/disk.raw]
+
+# shellcheck source=ci/lib.sh
+. "$(dirname "$0")/lib.sh"
+
+image="${1:-$OUT/disk.raw}"
+[ -f "$image" ] || die "$image not found; run ./ci/image first"
+python3 "$REPO/tools/qemu-test.py" --arch "$ARCH" --image "$image" \
+    --gpu 2d --memory 4G --timeout 900 \
+    --extra-unit "$REPO/tests/vm/beamline-desktop-check.timer" \
+    --extra-unit "$REPO/tests/vm/beamline-desktop-check.service" \
+    --wants beamline-desktop-check.timer \
+    --type 'Started GNOME Display Manager::35::{down}{ret}' \
+    --type 'Started GNOME Display Manager::42::dev{ret}' \
+    --require BEAMLINE_SELINUX_OK --expect BEAMLINE_DESKTOP_OK \
+    --screendump "$(dirname "$image")/desktop.ppm" \
+    --log "$(dirname "$image")/serial-desktop.log"

@@ -41,7 +41,7 @@ log "installing BuildStream, buildbox and QEMU"
 # shellcheck disable=SC2086
 $SUDO dnf install -y --setopt=install_weak_deps=False \
     buildstream buildbox bubblewrap \
-    git-core lzip patch python3 python3-dulwich ShellCheck \
+    git-core lzip patch python3 python3-dulwich python3-tomlkit ShellCheck \
     qemu-img $qemu_packages
 
 bst --version

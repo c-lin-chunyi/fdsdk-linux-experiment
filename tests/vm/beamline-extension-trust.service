@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: MIT
+#
+# VM test (ci/test-extensions, docs/security.md §15 "tampered sysext activates: denied",
+# docs/decisions.md D50): three copies of the admin image, tampered by the test harness, are
+# offered as admin.raw in turn; none may merge. Then the signed image merges through
+# beamline-admin.service. Injected through a systemd.extra-unit credential; never part of an
+# image, so it may use dash.
+
+[Unit]
+Description=Refuse tampered and unsigned extension images, merge the signed one
+ConditionPathExists=!/etc/initrd-release
+After=beamline-boot-ok.service
+
+[Service]
+Type=oneshot
+StandardOutput=journal+console
+Environment=POLICY=root=signed+absent:usr=signed+absent
+ExecStart=/usr/bin/sh -c 'for d in tamper-signature tamper-data tamper-unsigned; do systemd-tmpfiles --create --inline "L+ /run/extensions/admin.raw - - - - /dev/disk/by-id/virtio-$d" || exit 1; systemd-sysext refresh --image-policy="$POLICY"; if [ -e /usr/lib/extension-release.d/extension-release.admin ]; then echo "UNEXPECTED: $d merged"; exit 1; fi; echo "refused: $d"; done; systemd-tmpfiles --remove --inline "r /run/extensions/admin.raw"; systemd-sysext refresh --image-policy="$POLICY"'
+ExecStart=/usr/bin/systemctl start beamline-admin.service
+ExecStart=/usr/bin/bash --version
+ExecStart=/usr/bin/systemd-escape BEAMLINE_EXTENSION_TRUST_OK

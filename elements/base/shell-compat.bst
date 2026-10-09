@@ -25,6 +25,7 @@ config:
     - ln -s dash "%{install-root}%{bindir}/sh"
 
 sources:
-- kind: git_repo
+- kind: git
   url: kernel:utils/dash/dash.git
   track: master
+  ref-format: git-describe

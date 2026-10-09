@@ -2,9 +2,9 @@
 
 kind: manual
 description: |
-  /usr/lib/os-release rendered from project.conf identity variables. ID, VERSION_ID,
-  SYSEXT_LEVEL and ARCHITECTURE are the extension compatibility keys (docs/spec.md §8);
-  IMAGE_VERSION is the snapshot identifier (§17.2).
+  /usr/lib/os-release rendered from project.conf identity variables. IMAGE_VERSION is the
+  snapshot identifier (§17.2). ID, SYSEXT_LEVEL/CONFEXT_LEVEL (the snapshot identifier too)
+  and ARCHITECTURE are the extension compatibility keys (docs/spec.md §8, decisions D50).
 
 build-depends:
 - junctions/freedesktop-sdk.bst:public-stacks/runtime-gnu.bst

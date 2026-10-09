@@ -9,7 +9,8 @@
 #   elements/components/systemd.bst
 # Changes from the original: dependencies carry the junction prefix (the build dependency
 # is the systemd-base override), target_arch conditions use arch, libapparmor and
-# libmicrohttpd are dropped from runtime-depends, and project_licensedir keeps FDSDK's path.
+# libmicrohttpd are dropped from runtime-depends, libselinux is added to them (SELinux is
+# enabled, docs/security.md §19.2), and project_licensedir keeps FDSDK's path.
 
 kind: filter
 description: |
@@ -30,6 +31,7 @@ runtime-depends:
 - junctions/freedesktop-sdk.bst:bootstrap/xz.bst
 - junctions/freedesktop-sdk.bst:components/systemd-libs.bst
 - junctions/freedesktop-sdk.bst:components/audit.bst
+- junctions/freedesktop-sdk.bst:bootstrap/libselinux.bst
 - junctions/freedesktop-sdk.bst:components/libgpg-error.bst
 - junctions/freedesktop-sdk.bst:components/linux-pam.bst
 - junctions/freedesktop-sdk.bst:components/kmod.bst

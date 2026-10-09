@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: MIT
+#
+# SELinux Stage 0 records AVC denials (docs/security.md §15, §16): print this boot's denials
+# on the console, where tools/integrate.py collects them into the snapshot manifest.
+
+[Unit]
+Description=Report SELinux AVC denials on the console
+ConditionSecurity=selinux
+After=multi-user.target beamline-selinux-ok.service
+Before=beamline-boot-ok.service
+
+[Service]
+Type=oneshot
+ExecStart=-/usr/bin/journalctl --boot --no-pager --output=cat _TRANSPORT=audit --grep=avc:
+StandardOutput=journal+console
+
+[Install]
+WantedBy=multi-user.target

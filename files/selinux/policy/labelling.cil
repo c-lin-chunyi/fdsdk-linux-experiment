@@ -1,0 +1,55 @@
+; SPDX-License-Identifier: MIT
+;
+; How objects get labels (docs/security.md §19.1): initial SID contexts, filesystems that
+; store labels in xattrs, filesystems labelled by their creator, and pseudo filesystems.
+
+(context system_low (system_u object_r unlabeled_t ((s0) (s0))))
+
+; Initial SIDs the kernel uses (kernel.cil declares them all)
+(sidcontext kernel (system_u system_r kernel_t ((s0) (s0 (range c0 c1023)))))
+(sidcontext security (system_u object_r security_t ((s0) (s0))))
+(sidcontext unlabeled system_low)
+(sidcontext file system_low)
+(sidcontext init (system_u system_r init_t ((s0) (s0 (range c0 c1023)))))
+(sidcontext any_socket system_low)
+(sidcontext port (system_u object_r port_t ((s0) (s0))))
+(sidcontext netif (system_u object_r netif_t ((s0) (s0))))
+(sidcontext netmsg system_low)
+(sidcontext node (system_u object_r node_t ((s0) (s0))))
+(sidcontext devnull (system_u object_r null_device_t ((s0) (s0))))
+
+; Labels stored in extended attributes: SYSTEM and extensions (erofs, labelled by
+; mkfs.erofs), DATA (ext4, labelled at runtime), merged extensions (overlay).
+(fsuse xattr erofs (system_u object_r fs_t ((s0) (s0))))
+(fsuse xattr ext4 (system_u object_r fs_t ((s0) (s0))))
+(fsuse xattr overlay (system_u object_r fs_t ((s0) (s0))))
+
+; Labels derived from the creating process and the parent directory
+(fsuse trans tmpfs (system_u object_r tmpfs_t ((s0) (s0))))
+(fsuse trans devtmpfs (system_u object_r device_t ((s0) (s0))))
+(fsuse trans devpts (system_u object_r devpts_t ((s0) (s0))))
+(fsuse trans mqueue (system_u object_r mqueue_t ((s0) (s0))))
+(fsuse task pipefs (system_u object_r fs_t ((s0) (s0))))
+(fsuse task sockfs (system_u object_r fs_t ((s0) (s0))))
+
+; Pseudo filesystems and the ESP
+(genfscon proc "/" (system_u object_r proc_t ((s0) (s0))))
+(genfscon sysfs "/" (system_u object_r sysfs_t ((s0) (s0))))
+(genfscon selinuxfs "/" (system_u object_r security_t ((s0) (s0))))
+(genfscon securityfs "/" (system_u object_r securityfs_t ((s0) (s0))))
+(genfscon cgroup2 "/" (system_u object_r cgroup_t ((s0) (s0))))
+(genfscon efivarfs "/" (system_u object_r efivarfs_t ((s0) (s0))))
+(genfscon bpf "/" (system_u object_r bpf_t ((s0) (s0))))
+(genfscon debugfs "/" (system_u object_r debugfs_t ((s0) (s0))))
+(genfscon tracefs "/" (system_u object_r tracefs_t ((s0) (s0))))
+(genfscon pstore "/" (system_u object_r pstore_t ((s0) (s0))))
+(genfscon configfs "/" (system_u object_r configfs_t ((s0) (s0))))
+(genfscon fusectl "/" (system_u object_r fusefs_t ((s0) (s0))))
+(genfscon fuse "/" (system_u object_r fusefs_t ((s0) (s0))))
+(genfscon binfmt_misc "/" (system_u object_r binfmt_misc_t ((s0) (s0))))
+(genfscon hugetlbfs "/" (system_u object_r hugetlbfs_t ((s0) (s0))))
+(genfscon autofs "/" (system_u object_r autofs_t ((s0) (s0))))
+(genfscon nsfs "/" (system_u object_r nsfs_t ((s0) (s0))))
+(genfscon ramfs "/" (system_u object_r tmpfs_t ((s0) (s0))))
+(genfscon rootfs "/" (system_u object_r root_t ((s0) (s0))))
+(genfscon vfat "/" (system_u object_r boot_t ((s0) (s0))))

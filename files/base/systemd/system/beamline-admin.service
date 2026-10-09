@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: MIT
+#
+# On-demand activation of the admin extension (docs/spec.md §7.2, docs/decisions.md D36, D50):
+# `systemctl start beamline-admin` merges bash, uutils coreutils and the maintenance tools
+# into /usr, and their configuration into /etc; stopping it unmerges both. Nothing enables
+# it: normal operation never needs the admin tools. The images live on DATA, outside the
+# extension search paths, one per snapshot; %A picks the one built with this SYSTEM. Only
+# signed images merge, and /etc keeps its mutable layer (D56).
+
+[Unit]
+Description=Merge the admin system extension
+ConditionPathExists=/var/lib/beamline/extensions/admin_%A.raw
+ConditionPathExists=/var/lib/beamline/confexts/admin_%A.raw
+After=local-fs.target systemd-sysext.service systemd-confext.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/systemd-tmpfiles --create --inline "L /run/extensions/admin.raw - - - - /var/lib/beamline/extensions/admin_%A.raw" "L /run/confexts/admin.raw - - - - /var/lib/beamline/confexts/admin_%A.raw"
+ExecStart=/usr/bin/systemd-sysext refresh --image-policy=root=signed+absent:usr=signed+absent
+ExecStart=/usr/bin/systemd-confext refresh --mutable=yes --image-policy=root=signed+absent:usr=signed+absent
+ExecStop=/usr/bin/systemd-tmpfiles --remove --inline "r /run/extensions/admin.raw" "r /run/confexts/admin.raw"
+ExecStop=/usr/bin/systemd-sysext refresh --image-policy=root=signed+absent:usr=signed+absent
+ExecStop=/usr/bin/systemd-confext refresh --mutable=yes --image-policy=root=signed+absent:usr=signed+absent

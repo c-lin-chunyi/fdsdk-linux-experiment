@@ -2,7 +2,10 @@
 # SPDX-License-Identifier: MIT
 #
 # Boot the checked-out Virt image on this host (HVF on macOS, KVM or TCG on Linux) and
-# wait for BEAMLINE_BOOT_OK on the serial console. The image itself is never modified.
+# wait for BEAMLINE_BOOT_OK on the serial console, after BEAMLINE_SELINUX_OK (a policy is
+# loaded, docs/security.md §16). The extensions are not merged: the base must boot healthy
+# without any desktop (docs/spec.md §5.1; ci/test-desktop covers the merged system). The
+# image itself is never modified.
 #   ./ci/boot [path/to/disk.raw]
 
 # shellcheck source=ci/lib.sh
@@ -10,4 +13,7 @@
 
 image="${1:-$OUT/disk.raw}"
 [ -f "$image" ] || die "$image not found; run ./ci/image first"
-python3 "$REPO/tools/qemu-test.py" --arch "$ARCH" --image "$image" --log "$(dirname "$image")/serial.log"
+python3 "$REPO/tools/qemu-test.py" --arch "$ARCH" --image "$image" \
+    --kernel-arg systemd.mask=systemd-sysext.service \
+    --kernel-arg systemd.mask=systemd-confext.service \
+    --require BEAMLINE_SELINUX_OK --log "$(dirname "$image")/serial.log"

@@ -10,4 +10,10 @@ bst_run build image/disk-virt.bst
 rm -rf "$OUT"
 mkdir -p "$(dirname "$OUT")"
 bst_run artifact checkout --directory "$OUT" image/disk-virt.bst
+# The admin extension image on its own, for ci/test-extensions' tampered copies.
+bst_run artifact checkout --directory "$OUT/extensions" extensions/admin.bst
+# The snapshot's update artifacts: a channel directory for ci/test-update, and what an
+# integration cycle publishes (docs/decisions.md D52).
+bst_run build image/update-virt.bst
+bst_run artifact checkout --directory "$OUT/update" image/update-virt.bst
 log "image: $OUT/disk.raw"

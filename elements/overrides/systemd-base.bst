@@ -8,11 +8,13 @@
 # Copied from: freedesktop-sdk c67967f99ce9aafd75bf5b3091f5d2da094bdd61
 #   elements/components/_private/systemd-base.bst
 # Changes from the original: dependencies carry the junction prefix, target_arch
-# conditions use arch, the source is inline and tracks main (it was
-# elements/include/systemd.yml, track v*), the preset file is a local copy,
+# conditions use arch, the source is inline, tracks main and uses the classic git source
+# (it was elements/include/systemd.yml, git_repo, track v*; decisions D33), the preset file
+# is a local copy,
 # project_licensedir keeps FDSDK's path (FDSDK's systemd filters whitelist overlaps there),
-# and features the base does not use are disabled with their build dependencies removed
-# (docs/spec.md §5.2): AppArmor, QR codes, xkbcommon, journal-remote/upload (microhttpd).
+# features the base does not use are disabled with their build dependencies removed
+# (docs/spec.md §5.2): AppArmor, QR codes, xkbcommon, journal-remote/upload (microhttpd),
+# and SELinux is enabled with libselinux as a build dependency (docs/security.md §19.2).
 
 kind: meson
 
@@ -24,6 +26,7 @@ build-depends:
 - junctions/freedesktop-sdk.bst:bootstrap/grep.bst
 - junctions/freedesktop-sdk.bst:bootstrap/diffutils.bst
 - junctions/freedesktop-sdk.bst:components/audit.bst
+- junctions/freedesktop-sdk.bst:bootstrap/libselinux.bst
 - junctions/freedesktop-sdk.bst:components/gperf.bst
 - junctions/freedesktop-sdk.bst:components/m4.bst
 - junctions/freedesktop-sdk.bst:components/libcap.bst
@@ -115,7 +118,7 @@ variables:
     -Dkernel-install=true
     -Dvmlinux-h=provided
     -Dvmlinux-h-path='%{includedir}/%{gcc_triplet}/linux/vmlinux.h'
-    -Dselinux=disabled
+    -Dselinux=enabled
     -Dsysupdated=enabled
     -Dremote=disabled
     -Dmicrohttpd=disabled
@@ -176,9 +179,10 @@ public:
       - "%{project_licensedir}/**"
 
 sources:
-- kind: git_repo
+- kind: git
   url: github:systemd/systemd.git
   track: main
+  ref-format: git-describe
   version-guess-pattern: '(\d+)(?:\.(\d+))?'
 - kind: local
   path: files/overrides/systemd/90-sysupdate.preset

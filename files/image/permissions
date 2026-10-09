@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: MIT
+#
+# File modes that BuildStream artifacts cannot carry: they keep only the executable bit, so
+# every other file arrives 0644 and every directory 0755 (docs/decisions.md D31). The
+# elements that create filesystems apply this list to a copy of the tree, just before mkfs.
+#
+# <octal mode> <absolute path>
+
+# sysusers creates these 0000; 0400 is still root-only, and readable by the build sandbox.
+0400 /etc/shadow
+0400 /etc/gshadow
+
+# systemd installs its credential stores 0700.
+0700 /etc/credstore
+0700 /etc/credstore.encrypted

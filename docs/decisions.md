@@ -1434,10 +1434,12 @@ test ends with zero unexpected denials. It is still permissive; step 11 enforces
   - Only run0 adds a PAM session, which is what gives `admin_t`. A wheel user who may use run0
     can therefore start a transient service without PAM, which runs as root in `init_t`, a
     platform domain. Neither SELinux nor polkit can tell the requests apart today.
-  - Closing this needs a way to require a PAM session, or `SELinuxContext=admin_t`, on every
-    transient unit a session requests. That is a systemd change, or a privileged broker in
-    place of the direct D-Bus call. It is recorded for the owner; 0.0.3's negative tests cover
-    run0 itself.
+  - Closing this needs PID 1 to bound every transient unit a session requests: no context
+    higher than the caller's unless PAM assigns one. The owner decided on a downstream systemd
+    patch, to be proposed upstream afterwards. A distribution broker was rejected: it would be
+    a new privileged service parsing user requests (security §9.2), and it closes nothing
+    while PID 1's transient-unit call stays open to sessions. 0.0.3's negative tests cover run0
+    itself.
 
 ## D59. Stage 1 enforcing, negative tests, denial gating
 
@@ -1494,7 +1496,8 @@ test ends with zero unexpected denials. It is still permissive; step 11 enforces
     (`ci/test-update`), the unauthorized update request (`ci/test-run0`), and the production
     boot's mode (`ci/boot`).
   - Deferred, as security §15 says:
-    - the Python script, since no artifact ships an interpreter;
+    - the Python script, since no artifact ships an interpreter. (Wrong: the base shipped
+      Python 3.14 through GLib's developer tools. Corrected in D60.)
     - privileged BPF, since none ships BPF tooling;
     - `beamlinectl`, the updater's library and script loading, and containers.
 - **Expected denials.** `policy/selinux-expected.toml` lists the 11 denials these tests provoke.
@@ -1503,3 +1506,99 @@ test ends with zero unexpected denials. It is still permissive; step 11 enforces
   Nothing else may deny.
 - **Not closed.** A wheel member can still reach `init_t` through `systemd-run` (D58, security
   §9.4).
+
+## D60. 0.0.4 direction: an interpreter-poor base, POSIX extensions, setuid-free
+
+Spec revision 7, security revision 4. The owner set the direction after a reality check of the
+0.0.3 images and two rounds of questions. Recorded here: the decisions, the facts they rest on,
+and where the owner chose between alternatives.
+
+**Facts from the reality check (snapshot 20261009.2312)**
+- The base had Python 3.14 and `libpython`. gnome-build-meta's `sdk/glib.bst`, carried in
+  Beamline's FDSDK junction (D28), depends at runtime on `python3-packaging` for GLib's
+  developer tools. D59 and security §15 wrongly said no artifact shipped an interpreter.
+- The desktop added `gjs`/`gjs-console`, `lua` and `wpexec`, about 125 Python scripts, 84 `sh`
+  scripts and 16 `bash` scripts with no bash to run them. It also brought parts of Samba,
+  OpenSSH (server pieces included), LVM, iptables, plymouth, pppd and NetworkManager's CLI.
+- No artifact had a setuid or setgid file: BuildStream drops the bits (D31), and
+  `files/image/permissions` restores none. `fusermount3`, which Flatpak's document portal
+  needs, was therefore not setuid either.
+- GDM executes the session program directly; it falls back to `/bin/sh` only for a script the
+  kernel cannot execute, and only exports `SHELL`. gnome-session is a compiled program, not the
+  old wrapper that re-ran itself through the login shell. A login shell that is not a shell
+  does not break graphical login.
+- os-test measures the C library, headers, system calls and paths. Its utilities suite is
+  planned, not written, and it runs over ssh with tests built on the target. Debian (glibc)
+  scores about 92%, mostly lost on glibc's headers and functions. The owner dropped it as a
+  goal.
+
+**Decisions**
+- **Composition.**
+  - "Base image" means SYSTEM alone: healthy, not meaningfully interactive.
+  - base + desktop is a conventional desktop without a UNIX environment.
+  - base + `posix` is a traditional UNIX server; all three together give both.
+- **Interpreters.**
+  - What matters is interpreters a user can run. Embedded engines that only run system code
+    stay: GNOME Shell's SpiderMonkey, polkit's duktape, WirePlumber's Lua.
+  - Python leaves the base. `gjs`, `lua` and `wpexec` leave the desktop unless that regresses
+    it.
+  - Flatpak applications and binaries a user brings to their own home stay allowed:
+    uncomfortable, not prohibited.
+- **The shell.**
+  - The first aim was a base without `/bin/sh`. It conflicted with rule 17: `posix-devel` and
+    the printing extension need a shell, as do Xwayland's session scripts and Flatpak's
+    triggers. The owner chose to keep `dash` in the base as `/bin/sh`, so the goal is no
+    interactive login shell.
+  - The initrd gets no shell.
+  - `login`'s empty-shell fallback, `systemd-run --shell` and `sulogin` may stop working in
+    the base.
+- **The login shell.**
+  - `/usr/libexec/beamline-shell` is a stub written in C (the project's first runtime code)
+    and listed in `/etc/shells`.
+  - Interactively it prints how to get a shell and exits. As an interpreter it fails non-zero.
+  - It is systemd-homed's built-in default (`-Ddefault-user-shell`). Root keeps nologin. Users
+    may switch to `/usr/bin/bash`. Test accounts keep `/usr/bin/sh`.
+- **`posix`.**
+  - It replaces the admin extension: mostly the same contents, named and made explicit.
+  - **Utilities:** POSIX.1-2024 mandatory plus User Portability. Excluded: XSI-only, SCCS,
+    UUCP, and utilities needing a daemon or privilege (`at`, `batch`, `crontab`, `mailx`,
+    `talk`, `write`, `mesg`, `newgrp`). The goal is a userspace defined by an external
+    specification, not a UNIX.
+  - **Order of preference:** uutils, including sibling projects once they pass their own
+    suites, then GNU, then others. uutils is preferred even where it deviates from POSIX.
+  - **Extras:** `bash` (`/usr/bin/bash`), `mandoc` with the POSIX manual pages, and a named set
+    of system tools POSIX does not define. Base tools no service needs move here.
+- **`posix-devel`** replaces devel: POSIX C and software development, plus toolchains.
+- **`printing-scanning`.**
+  - CUPS, its filters and backends, SANE and HPLIP; `lp` exists only there.
+  - The desktop keeps `libcups`. Avahi joins the base.
+- **The desktop.**
+  - GNOME Shell extension support is removed at build time. `desktop-gnome-advanced` comes later
+    as a conflicting alternative with more customization.
+  - The SSH server, LVM, iptables, plymouth, pppd and NetworkManager's CLI leave it. Samba
+    stays.
+- **Toggles.**
+  - Only administrators toggle extensions, and 0.0.4 has no toggle tool.
+  - Persistence comes later with a daemon and `beamlinectl`. The GUI never offers disabling
+    the desktop, and `beamlinectl` disables it only while `posix` is enabled.
+- **Setuid-free.**
+  - No setuid, setgid or file-capability binaries, except `fusermount3`, the sole exception
+    until upstream's setuid-free FUSE.
+  - No `newgrp`. Rootless containers' ID mapping goes through privileged services.
+- **`systemd-run`.** The downstream patch (D58) is the last 0.0.4 step.
+- **Later.** `desktop-kde`.
+
+**0.0.4 steps** (spec §39; one green frozen cycle each, then a HEAD integration):
+1. Python out of the base.
+2. The stub shell.
+3. `posix` replaces admin.
+4. `printing-scanning`.
+5. Desktop interpreters and Shell extensions.
+6. Desktop pruning.
+7. The setuid audit and FUSE.
+8. `posix-devel`.
+9. The `systemd-run` patch.
+10. A HEAD integration.
+
+**Section numbers.** Spec §39 is new; former §39–§43 are now §40–§44. Live references in AGENTS
+and security were updated; revision-history entries keep the numbers of their own revision.

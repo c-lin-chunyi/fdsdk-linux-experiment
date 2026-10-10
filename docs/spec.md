@@ -8,7 +8,7 @@
 - Primary upstream substrate: Freedesktop SDK
 - Desktop recipe source: gnome-build-meta (GNOME)
 - Primary system framework: systemd
-- Revision: 6 (2026-10-09)
+- Revision: 7 (2026-10-10)
 
 > This file is the project's authoritative specification. The project owner changes it by
 > publishing a new revision. Deviations and interpretations made while implementing it are
@@ -17,6 +17,22 @@
 
 ## Revision History
 
+- **Revision 7 (2026-10-10).**
+  - Extensions compose four experiences: the base alone (healthy, not meaningfully
+    interactive), base + desktop, base + `posix` (a traditional UNIX server), and all
+    together (§5.1).
+  - The base exposes no interpreter a user can run, other than `/bin/sh`: Python leaves it.
+    `dash` stays as `/bin/sh` for compatibility (§5.2, §6).
+  - Human accounts get no interactive shell by default: their login shell is
+    `beamline-shell`, a stub that explains how to get one (§6, §18.3).
+  - The administrative and development extensions become `posix` and `posix-devel`. Their
+    contents follow POSIX.1-2024 instead of a hand-picked list (§7.2, §7.3). Printing and
+    scanning move to `printing-scanning`; Avahi joins the base (§5.2, §7.4).
+  - GNOME Shell's extension support is removed. A `desktop-gnome-advanced` alternative may
+    restore it later (§7.1).
+  - No artifact contains setuid, setgid or file-capability binaries, except `fusermount3`
+    until a setuid-free FUSE exists (§22).
+  - 0.0.4 scope is added as §39; the sections after it are renumbered (§39–§44).
 - **Revision 6 (2026-10-09).**
   - Human accounts are systemd-homed users (LUKS + btrfs) from 0.0.3, created at first boot.
     GDM autologin ends: homed needs the password to activate a home area (§18.3, §30).
@@ -362,6 +378,22 @@ The base image shall contain only facilities required for:
 
 The base shall boot into a healthy state without any desktop extension.
 
+The base alone is a healthy system, but not a meaningfully interactive one. Extensions compose
+the experiences above it:
+
+```
+base                         healthy; no interactive environment
+base + desktop-gnome         a conventional desktop, without an interactive UNIX environment
+base + posix                 a traditional interactive UNIX server
+base + desktop-gnome + posix both
+```
+
+The base exposes no interpreter that a user can run, other than `/bin/sh` (§6): no Python,
+Perl, Lua or JavaScript runtime. Interpreters embedded in a component that only run system code
+(polkit's rules engine, for one) are not exposed and may remain. Lower-integrity code stays
+possible (security §10.1), but uncomfortable: Flatpak applications and binaries a user brings to
+their own home are allowed; the base just does not hand out interpreters.
+
 ### 5.2 Expected Base Components
 
 Initial base contents shall approximately include:
@@ -399,12 +431,14 @@ cryptsetup libraries/tools required by boot and homed
 verity tooling
 mkfs.btrfs (homed home areas)
 gpg (update signature verification only)
-minimal util-linux functionality
+util-linux and other tools only where a base service needs them
+Avahi (mDNS/DNS-SD; systemd-resolved's multicast DNS stays off)
 
 CA certificates
 crypto libraries
 
-dash or equivalent minimal POSIX shell
+dash as /bin/sh (the only interpreter a user can run, §6)
+beamline-shell (the default login shell, a stub, §6)
 
 libselinux
 SELinux policy (CIL, MCS) and file contexts
@@ -416,9 +450,12 @@ The base systemd build shall leave out features the base does not use: journal-r
 
 ## 6. Shell and Command-Line Policy
 
-Bash shall not be part of the base image.
+Bash shall not be part of the base image. `/usr/bin/bash` comes with the `posix` extension
+(§7.2).
 
-A small POSIX-compatible `/bin/sh` shall remain available as a compatibility interface.
+A small POSIX-compatible `/bin/sh` shall remain available as a compatibility interface. Base
+components and extensions run it non-interactively: Xwayland's session scripts, Flatpak's
+triggers, CUPS filters, build tools.
 
 Recommended arrangement:
 
@@ -444,9 +481,38 @@ $()
 
 Shell usage shall be restricted to exceptional compatibility cases.
 
+Human accounts get no interactive shell by default. Their login shell is
+`/usr/libexec/beamline-shell`, listed in `/etc/shells` and built into systemd-homed as the
+default shell:
+
+```
+run interactively     prints how to get a shell (an administrator enables posix;
+                      homectl update --shell=/usr/bin/bash; a Flatpak terminal's command)
+                      and exits
+run as an interpreter fails with a non-zero status
+(-c, a script, no terminal)
+```
+
+A user may make `/usr/bin/bash` their shell once `posix` is enabled. Root's shell stays nologin
+(§18.1). The initrd contains no shell.
+
 ## 7. System Extensions
 
-Three major system-extension classes shall be supported.
+The official system extensions:
+
+```
+desktop-gnome        the GNOME desktop                                    (§7.1)
+posix                POSIX userspace and system tools, bash                (§7.2)
+posix-devel          POSIX development utilities and toolchains            (§7.3)
+printing-scanning    CUPS, SANE and drivers                                (§7.4)
+```
+
+Later alternatives, each a complete extension that excludes the one it varies (§8):
+`desktop-gnome-advanced` (GNOME with more user customization, Shell extensions included) and a
+KDE desktop.
+
+Where an external specification defines what a class of tools must provide, the extension
+follows the specification instead of a hand-picked list.
 
 ### 7.1 Desktop Extension
 
@@ -468,8 +534,16 @@ PipeWire and WirePlumber
 Mesa
 Flatpak
 GNOME Shell as the graphical polkit agent (polkit itself is base, §5.2)
+libcups, for GTK's print dialog (the printing services are §7.4)
 fonts, icons, backgrounds, schemas
 ```
+
+GNOME Shell's extension support is removed when it is built: extensions run user-provided
+JavaScript inside the shell. The interpreters that only serve the desktop internally (GNOME
+Shell's SpiderMonkey, WirePlumber's Lua) stay embedded; their user-runnable front ends (`gjs`,
+`lua`, `wpexec`) are left out wherever the desktop works without them. Components GNOME pulls in
+but the desktop does not need (an SSH server, LVM, firewall and dial-up tools, plymouth,
+NetworkManager's command line) are left out where its dependencies allow.
 
 Terminal emulators and other desktop utilities (editors, viewers, browsers, mail, help) shall be delivered as Flatpak applications, not as extension content.
 
@@ -477,42 +551,46 @@ No final artifact (SYSTEM, initrd, UKI or any official extension) shall contain 
 
 Final placement of Mesa, PipeWire and Flatpak between base and desktop extension shall remain subject to integration testing.
 
-### 7.2 Administrative Extension
+### 7.2 POSIX Userspace Extension
 
-`admin.sysext` shall provide interactive maintenance tools absent from the normal base.
+`posix` provides the interactive environment the base leaves out. It replaces the earlier
+administrative extension.
 
-Expected contents:
+Its utilities follow POSIX.1-2024 (SUSv5, Issue 8):
 
 ```
-bash
-uutils coreutils (multicall)
-grep
-sed
-awk
-findutils
-procps
-iproute2 extras
-ethtool
-pciutils
-usbutils
-strace
-tcpdump
-lsof
-curl
-jq
-less
-file
-text editor
-filesystem diagnostic tools
+included    the mandatory utilities, and the User Portability option
+            (vi, man, more, job control, ...)
+excluded    XSI-only utilities, SCCS, UUCP, and utilities that need a daemon or
+            privilege: at, batch, crontab, mailx, talk, write, mesg, newgrp
+elsewhere   lp (printing-scanning, §7.4); development utilities (posix-devel, §7.3)
 ```
 
-Normal installations shall not require permanent activation of `admin.sysext`.
+The goal is not a certified UNIX: it is a userspace whose contents an external specification
+defines. Each utility uses, in order of preference, uutils (coreutils, and its sibling projects
+once they pass their own test suites), GNU, or another implementation. A list of the required
+utilities is part of the repository, and the build checks the extension against it.
+
+It also carries:
+
+```
+bash (/usr/bin/bash)
+mandoc and the POSIX manual pages
+named system tools POSIX does not define: filesystem and disk tools, kmod,
+    SELinux and audit tools, iproute2, pciutils, usbutils, strace, curl, jq,
+    less, file, ...
+user-facing tools no base service needs (moved from the base)
+```
+
+Normal installations shall not require permanent activation of `posix`.
 
 Coreutils shipped in any Beamline artifact (this extension, the recovery environment, or any later image content) shall be uutils coreutils. It shall be deployed as a single multicall `coreutils` binary, with one symlink per utility. GNU coreutils may still serve as a build-time tool inside BuildStream sandboxes, as long as it never reaches an artifact.
 
-### 7.3 Development Extension
+### 7.3 POSIX Development Extension
 
-`devel.sysext` shall support operating-system development and low-level debugging.
+`posix-devel` shall support software and operating-system development and low-level debugging.
+It provides the POSIX C-language and software development utilities (`c17`, `make`, `lex`,
+`yacc`, `ar`, `nm`, `strip`, ...) and toolchains.
 
 Possible contents:
 
@@ -532,7 +610,14 @@ kernel headers
 debug symbols
 ```
 
-Application development shall preferentially occur inside an `nspawn` development machine rather than directly through `devel.sysext`.
+Application development shall preferentially occur inside an `nspawn` development machine rather than directly through `posix-devel`. Rootless containers, when they arrive, map user IDs through a privileged service, not setuid helpers (§22).
+
+### 7.4 Imaging and Printing Extension
+
+`printing-scanning` provides printing and scanning services: the CUPS scheduler, filters and
+backends, `lp`, SANE, and printer drivers such as HPLIP. Without it, the desktop still shows
+GTK's print dialog (through `libcups`) but has no local printing service. CUPS keeps its state
+and configuration on DATA. Printer discovery uses the base's Avahi.
 
 ## 8. Extension Compatibility
 
@@ -545,8 +630,9 @@ Example:
 ```
 base-42
 desktop-gnome-42.raw
-admin-42.raw
-devel-42.raw
+posix-42.raw
+posix-devel-42.raw
+printing-scanning-42.raw
 ```
 
 Extensions are EROFS images, labelled when they are built ([security.md](security.md) §19.1). From 0.0.3 each is a disk image with a dm-verity hash tree and a signature over its root hash, made with the development key until production keys exist; systemd activates only signed images. An extension's `/etc` content ships as a configuration extension (confext) of the same name. Fixed system users an official extension needs are created in the SYSTEM image when it is built (§18.2).
@@ -558,7 +644,13 @@ Extension images live on DATA: systemd refuses extensions stored below `/usr`, t
 /var/lib/beamline/confexts/desktop-gnome_<snapshot>.raw
 ```
 
-At boot, the running SYSTEM links the images of its own snapshot (`IMAGE_VERSION`) into `/run/extensions` and `/run/confexts`. After a rollback, the older SYSTEM therefore finds its own extensions. On-demand extensions (`admin`) are linked the same way when activated.
+At boot, the running SYSTEM links the images of its own snapshot (`IMAGE_VERSION`) into `/run/extensions` and `/run/confexts`. After a rollback, the older SYSTEM therefore finds its own extensions. On-demand extensions (`posix`, `posix-devel`, `printing-scanning`) are linked the same way when activated.
+
+Only administrators enable or disable extensions. In 0.0.4 an administrator activates an
+on-demand extension for the running boot. Persistent choices arrive later with a Beamline
+daemon and its `beamlinectl` command, which keep them on DATA. Their rule is that the system
+never ends up without an interactive environment by accident: the graphical settings do not
+offer to disable the desktop, and `beamlinectl` disables it only while `posix` is enabled.
 
 Compatibility metadata shall use:
 
@@ -906,7 +998,7 @@ A channel is published as a directory: its `SHA256SUMS` lists the artifacts of t
 
 A new UKI is installed with boot counting. A boot is good when `boot-complete.target` is reached. After three failed attempts, systemd-boot falls back to the previous UKI, and the previous SYSTEM finds its own extensions (§8).
 
-An installed machine shall follow exactly one channel pointer (§17.3). Until publication (§39), that channel is fixed by the image (`latest`). It updates when that pointer names a newer snapshot than the one installed. Switching to a channel whose pointer names an older snapshot shall never downgrade automatically: downgrade is an explicit rollback or recovery operation.
+An installed machine shall follow exactly one channel pointer (§17.3). Until publication (§40), that channel is fixed by the image (`latest`). It updates when that pointer names a newer snapshot than the one installed. Switching to a channel whose pointer names an older snapshot shall never downgrade automatically: downgrade is an explicit rollback or recovery operation.
 
 Promotion shall reuse identical artifacts and never rebuild equivalent source states. The digest of a snapshot shall never change.
 
@@ -1059,6 +1151,9 @@ Human accounts are `systemd-homed` users (from 0.0.3). Each home area is a LUKS2
 
 homed needs the password to activate a home area, so there is no automatic graphical login.
 
+A new account's shell is `beamline-shell` (§6). A user may switch to `/usr/bin/bash` with
+`homectl update --shell=` once `posix` is enabled.
+
 The development and test accounts are defined by the test tooling's credentials. Neither the accounts nor their passwords are baked into the image.
 
 Long-term target:
@@ -1125,6 +1220,8 @@ polkit sees only the transient unit run0 starts, never the command, so it cannot
 
 polkit rules are part of SYSTEM (`/usr/share/polkit-1/rules.d`); `/etc/polkit-1/rules.d` stays empty.
 
+run0 is a client of PID 1's transient-unit interface, and so is `systemd-run`; only run0's PAM session leads to the admin domain. A downstream systemd patch (0.0.4, offered upstream afterwards) bounds the transient units a session requests: they run no higher than the caller unless PAM assigns their context, and a requested SELinux context needs the policy's permission to enter it.
+
 SELinux constrains privileged endpoints independently of polkit decisions; request handling rules for privileged services are in [security.md](security.md) §9.
 
 ## 20. Recovery Environment
@@ -1178,8 +1275,17 @@ polkit
         +
 minimal host software
         +
+no setuid, setgid or file-capability binaries
+        +
 disabled interactive root
 ```
+
+No artifact contains a setuid or setgid binary, or one with file capabilities. Privilege comes
+from services that check their callers (polkit, SELinux), not from a binary's mode. The one
+exception is `fusermount3`, until a setuid-free way to mount FUSE filesystems exists upstream;
+it runs in its own confined SELinux domain. Functions that traditionally need a setuid helper
+either leave (`newgrp`, `passwd`, `chsh`) or move to a privileged service (user-ID mapping for
+rootless containers).
 
 Typical service hardening shall consider:
 
@@ -1565,9 +1671,10 @@ beamline/
 │   ├── kernel/               linux-virt.bst, linux-hardware.bst (later), config.bst
 │   ├── profiles/             virt.bst, hardware.bst (later)
 │   ├── security/             SELinux policy and build-only policy tools
-│   ├── admin/                admin extension content (uutils, ...)
+│   ├── posix/                posix extension content (uutils, bash, ...)
 │   ├── desktop/              desktop-gnome content (project-owned desktop elements)
-│   ├── extensions/           EROFS sysext and confext images (admin, desktop-gnome, devel later)
+│   ├── extensions/           sysext and confext images (desktop-gnome, posix, posix-devel,
+│   │                         printing-scanning)
 │   ├── image/                root, initrd, UKI and disk composition per profile
 │   └── tests/                tests that run inside BuildStream
 │
@@ -1578,8 +1685,9 @@ beamline/
 │   ├── tracking.toml         designated branches, selection, pins
 │   └── unit-shell-allowlist.txt
 ├── ci/                       bootstrap, check, build, build-kernel, image, boot,
-│                             test-base, test-extensions, test-desktop, test-boot-entries,
-│                             test-update, test-security, test-all, integrate
+│                             test-base, test-reboot, test-verity, test-boot-entries,
+│                             test-update, test-run0, test-settings, test-security,
+│                             test-extensions, test-desktop, test-all, integrate
 ├── tools/                    integrate.py, qemu-test.py, check-policy.py, ...
 ├── lima/                     builder VM definition
 ├── docs/                     spec.md, security.md (normative annex), release-model.md,
@@ -1731,7 +1839,27 @@ SELinux Stage 1 (security.md §16): Virt production UKI enforcing,
 
 They are implemented in this order, one structural change per green integration cycle. SELinux Stage 1 comes last, so the enforcing policy covers everything before it.
 
-## 39. 0.1 Scope
+## 39. 0.0.4 Scope
+
+Expected additions:
+
+```
+no user-runnable interpreter in the base other than /bin/sh (Python leaves)
+beamline-shell as the default login shell
+posix replaces the administrative extension; utilities follow POSIX.1-2024;
+    user-facing tools leave the base for it
+printing-scanning: CUPS, SANE and drivers leave the desktop; Avahi joins the base
+desktop-gnome without GNOME Shell extension support or user-runnable interpreters,
+    and without components it does not need
+no setuid, setgid or file-capability binaries, except fusermount3
+posix-devel replaces the development extension
+the downstream systemd patch bounding transient units a session requests
+```
+
+They are implemented in this order, one structural change per green integration cycle, and a
+HEAD integration closes the milestone.
+
+## 40. 0.1 Scope
 
 Expected additions:
 
@@ -1744,7 +1872,7 @@ x86-64 and ARM64 hosted integration cycles
 snapshot publication (GitHub Releases), signed latest pointer, retention
 ```
 
-## 40. Later Security Milestones
+## 41. Later Security Milestones
 
 Expected progression (stages from [security.md](security.md) §16):
 
@@ -1766,7 +1894,7 @@ Secure Boot production key workflow
 Stage 4: MLS integrity, TPM-bound secrets and measured boot, attestation
 ```
 
-## 41. Non-Goals
+## 42. Non-Goals
 
 Initial development shall not attempt:
 
@@ -1776,7 +1904,7 @@ Initial development shall not attempt:
 * DKMS;
 * arbitrary QEMU hardware emulation;
 * every desktop environment;
-* immediate shell-less operation;
+* a base without `/bin/sh` (dash stays as a compatibility interface, §6);
 * immediate SELinux enforcement on physical hardware;
 * independent versioning of every sysext;
 * stable/testing/unstable source sets or per-package maturity policy;
@@ -1786,7 +1914,7 @@ Initial development shall not attempt:
 * perfect support for all physical devices;
 * local x86-64 builds as the main Apple Silicon development path.
 
-## 42. Architectural Invariants
+## 43. Architectural Invariants
 
 The following rules should remain stable unless strong evidence justifies revision:
 
@@ -1830,8 +1958,11 @@ The following rules should remain stable unless strong evidence justifies revisi
 38. No web engine or web JavaScript engine (WebKitGTK, JavaScriptCoreGTK, Chromium/CEF) enters a final artifact; web content runs in Flatpak applications.
 39. `/etc` in the SYSTEM image is read-only. Only an allowlist of system settings changes at runtime, through the mutable confext layer and scoped by SELinux; all other configuration arrives by snapshot or confext.
 40. Interactive privilege escalation is run0 only: polkit decides who, a confined SELinux domain decides what. su, sudo and pkexec are never shipped.
+41. The base exposes no interpreter a user can run other than `/bin/sh`, and human accounts get no interactive shell by default.
+42. No artifact contains setuid, setgid or file-capability binaries, except `fusermount3` until a setuid-free FUSE exists.
+43. Where an external specification defines a class of tools, the extension that ships them follows it (POSIX for `posix` and `posix-devel`) instead of a hand-picked list.
 
-## 43. Summary Architecture
+## 44. Summary Architecture
 
 ```
                        UPSTREAM HEADs
@@ -1876,10 +2007,11 @@ The following rules should remain stable unless strong evidence justifies revisi
                             │
                    systemd-sysupdate
                             │
-        ┌───────────────────┼───────────────────┐
-        │                   │                   │
- desktop-gnome        admin.sysext        devel.sysext
-        │              (uutils)
+        ┌──────────────┬────┴─────────┬──────────────────┐
+        │              │              │                  │
+ desktop-gnome       posix       posix-devel     printing-scanning
+        │       (POSIX.1-2024,   (toolchains)     (CUPS, SANE)
+        │       uutils, bash)
    GNOME Shell / GDM
    Wayland
    PipeWire

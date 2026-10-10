@@ -2,12 +2,12 @@
 
 ## Mandatory Integrity Boundaries and Code Provenance
 
-- Status: Normative annex of [spec.md](spec.md) (spec revision 6)
-- Revision: 3 (2026-10-09)
+- Status: Normative annex of [spec.md](spec.md) (spec revision 7)
+- Revision: 4 (2026-10-10)
 - Scope: Beamline base, Virt and Hardware profiles, RecoveryOS, system extensions,
   development environments, and CI infrastructure
 - Relationship: Extends spec §5–§8 and §18–§22. Where the two disagree, this annex governs
-  security matters, and spec §21, §22 and §40 summarise it.
+  security matters, and spec §21, §22 and §41 summarise it.
 
 > Adapted from the project owner's draft "MyOS Security Architecture". Changes made while
 > adopting it: the OS name and policy names (MyOS → Beamline, `myos_*` → `beamline_*`); the
@@ -22,6 +22,10 @@
 > `/etc` (§9.5), what Stage 1 contains (§16), which mandatory tests run in 0.0.3 (§15), and
 > development-key signing of both UKIs and of modules (§19.4, §19.5). The channels are
 > `latest` and `edge` (§7.1, §13.3).
+>
+> Revision 4 limits the interpreters a user can run in the base to `/bin/sh` (§8.2), makes
+> every artifact setuid-free with one exception (§11), and corrects the statement that no
+> artifact shipped an interpreter (§15).
 
 ---
 
@@ -143,7 +147,7 @@ Protection of sensitive user data from user-authorized code shall require separa
 
 Absolute protection against kernel exploitation, malicious authorized signers, compromised release infrastructure, microarchitectural attacks, and arbitrary interpreter-level code injection shall remain outside initial enforceable guarantees.
 
-Until production Secure Boot keys exist (spec §40), every guarantee in this annex holds only against attackers who cannot change the boot configuration or kernel command line.
+Until production Secure Boot keys exist (spec §41), every guarantee in this annex holds only against attackers who cannot change the boot configuration or kernel command line.
 
 The architecture shall nevertheless minimize exposure to relevant attack classes.
 
@@ -342,6 +346,8 @@ Privileged services shall avoid:
 
 The base shall retain minimal POSIX shell compatibility where required (dash, spec §6). Bash shall remain outside the base.
 
+The base exposes no interpreter that a user can run, other than `/bin/sh`: no Python, Perl, Lua or JavaScript runtime (spec §5.1). An interpreter embedded in a component that only runs system code (polkit's duktape, GNOME Shell's SpiderMonkey, WirePlumber's Lua) is not exposed and may remain. GNOME Shell's extension support is removed, because extensions run user-provided code inside the shell. This does not make P0 execution impossible, and is not meant to (§10.1): it keeps the base from handing out general-purpose interpreters. Human accounts get no interactive shell by default (spec §6).
+
 Base systemd units shall not depend on shell pipelines or script-driven service orchestration (spec §6, enforced by `tools/check-policy.py`).
 
 Web engines and web JavaScript engines (WebKitGTK, JavaScriptCoreGTK, Chromium/CEF) execute remote content through a JIT. That content is P0 dynamic code, so these engines are not part of the platform. No final artifact contains one: not SYSTEM, the initrd, a UKI, or an official extension (spec §7.1). Web content runs in Flatpak applications, at application integrity. `tools/check-policy.py` enforces the rule on every artifact tree.
@@ -442,7 +448,7 @@ Service-specific functionality shall determine applicable restrictions.
   The admin domain is P2, delegated authority: it may manage services, units and the allowlisted settings. It is never P3.
 - **polkit rules are platform code.** polkit evaluates its JavaScript rules with an interpreter (duktape). Rules are read only from SYSTEM (`/usr/share/polkit-1/rules.d`); `/etc/polkit-1/rules.d` stays empty, and no mutable location feeds rules.
 - `pkexec` is never shipped: a setuid general-purpose command runner contradicts §9.1.
-- **Known gap (0.0.3).** run0 is a client of PID 1's transient-unit call, and so is `systemd-run`. polkit sees the same action and the same unit naming for both, and SELinux the same `system start` permission. Only run0 adds the PAM session that leads to `admin_t`, so a wheel member can start a transient service without it, which runs in `init_t`. Requiring a PAM session or the admin context on every transient unit a session requests needs a systemd change or a privileged broker (decisions D58).
+- **Known gap (0.0.3).** run0 is a client of PID 1's transient-unit call, and so is `systemd-run`. polkit sees the same action and the same unit naming for both, and SELinux the same `system start` permission. Only run0 adds the PAM session that leads to `admin_t`, so a wheel member can start a transient service without it, which runs in `init_t`. Closing it is planned as a downstream systemd patch that bounds the transient units a session requests, to be proposed upstream (decisions D58).
 
 ### 9.5 Scoped mutable configuration
 
@@ -521,6 +527,8 @@ Applicable mechanisms shall include:
 - verified firmware or other source authentication where supported.
 
 Ordinary P0 processes shall not gain kernel-execution authority through local compilation or arbitrary program execution.
+
+No artifact contains setuid, setgid or file-capability binaries (spec §22). A binary's mode never confers privilege: privileged operations go through services that check their callers, under polkit and SELinux. The one exception is `fusermount3`, until a setuid-free way to mount FUSE filesystems exists upstream. It runs in its own SELinux domain, entered from user sessions, with only the rights a FUSE mount needs. `tools/check-policy.py` rejects setuid, setgid and capability bits in every artifact tree, allowing that one path.
 
 ## 12. IPE, IMA, and Other Integrity Mechanisms
 
@@ -653,7 +661,7 @@ CI shall include positive and negative enforcement tests. They run in the Virt p
 Security testing shall inspect actual SELinux contexts, domain transitions, executable mappings, audit records, and service permissions.
 
 In 0.0.3 (Stage 1) integration cycles run these tests: arbitrary unsigned ELF; modification of verified `/usr`; writes to privileged executable state and to non-allowlisted `/etc`; direct entry into the updater and admin domains; the updater executing `/var/tmp/helper`; unsigned module loading; `setenforce`; authorized and unauthorized update requests; signed and tampered sysext activation; another user's files (refused by file permissions and homed's encryption: Stage 1 does not separate users by type or category); rollback; and the production UKI's enforcing mode. `ci/test-security` runs the checks that must be refused as root, so that SELinux, not file permissions, is what refuses them. These tests are deferred, with their reason:
-- the Python script, because no artifact ships an interpreter (a test extension or P0 container follows);
+- the Python script. Revision 3 deferred it because "no artifact ships an interpreter"; that was wrong, since the base shipped Python 3.14 through GLib's developer tools (decisions D60). From 0.0.4 the base ships none, so the test runs from the `posix-devel` extension or a P0 container;
 - privileged BPF loading, because no artifact ships BPF tooling;
 - `beamlinectl`, the updater's library and script loading, and containers, which wait for the components they exercise (Stage 2).
 
@@ -794,7 +802,7 @@ The Virt kernel is built from `allnoconfig` (spec §11.4), so every security fea
 
 ### 19.5 Verified boot dependency
 
-Until Secure Boot with production keys exists (spec §40), the boot loader's command-line editor and unsigned boot entries can bypass enforcement. Once Stage 1 enforces, the systemd-boot editor is disabled. 0.0.3 signs UKIs and systemd-boot but does not enforce Secure Boot in its QEMU tests; without it, a host that controls the firmware or the SMBIOS command-line extras can still boot permissive. Guarantees are stated against that limitation (§4.4).
+Until Secure Boot with production keys exists (spec §41), the boot loader's command-line editor and unsigned boot entries can bypass enforcement. Once Stage 1 enforces, the systemd-boot editor is disabled. 0.0.3 signs UKIs and systemd-boot but does not enforce Secure Boot in its QEMU tests; without it, a host that controls the firmware or the SMBIOS command-line extras can still boot permissive. Guarantees are stated against that limitation (§4.4).
 
 ## 20. Deferred
 
@@ -808,7 +816,7 @@ Until then the builder stays pinned Layer 0 tooling outside the source graph (sp
 
 ## References
 
-- Beamline [spec.md](spec.md), §5–§8, §15–§22, §31, §42.
+- Beamline [spec.md](spec.md), §5–§8, §15–§22, §31, §43.
 - Linux kernel documentation: [Integrity Policy Enforcement](https://docs.kernel.org/admin-guide/LSM/ipe.html).
 - Linux kernel documentation: [IMA policy interface](https://github.com/torvalds/linux/blob/master/Documentation/ABI/testing/ima_policy).
 - Linux kernel documentation: [Executability checks](https://docs.kernel.org/userspace-api/check_exec.html).

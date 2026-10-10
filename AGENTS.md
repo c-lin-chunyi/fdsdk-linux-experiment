@@ -15,7 +15,7 @@ whole image, and publish only green **snapshots**. `latest` and `edge` are point
 immutable snapshots that move by evidence. There are no separate source tracks,
 and promotion never rebuilds anything.
 
-- [docs/spec.md](docs/spec.md) is the authoritative specification (revision 6). Cite it as `§N`.
+- [docs/spec.md](docs/spec.md) is the authoritative specification (revision 7). Cite it as `§N`.
 - [docs/security.md](docs/security.md) is its normative security annex: a Biba-style mandatory
   integrity hierarchy (P0 user code … P3 platform) on SELinux. Cite it as `security §N`.
 - [docs/release-model.md](docs/release-model.md) is the rationale for the release model.
@@ -40,22 +40,32 @@ a snapshot kept forever; **pin** = a temporary, visible exception in `policy/tra
 7. the `desktop-gnome` extension;
 8. the automated desktop test.
 
-Current milestone: 0.0.3 (§38, D43), one green integration cycle per step:
-1. a stable machine ID, saved on DATA and bound in by the initrd;
-2. development keys (`files/keys/dev`), signed UKIs, module signing;
-3. dm-verity SYSTEM, root hash in the signed UKI;
-4. XBOOTLDR, A/B SYSTEM slots, RECOVERY and the RecoveryOS stub, the development UKI, boot
-   counting;
-5. signed, verity-protected extensions, coupled to their snapshot;
-6. systemd-sysupdate following a signed channel directory, with upgrade and rollback tests;
-7. systemd-homed accounts (LUKS + btrfs);
-8. locked root with a nologin shell, polkit in the base, run0 as confined admin;
-9. scoped mutable `/etc` (system settings, scoped by SELinux);
-10. SELinux Stage 1 policy, still permissive, until no unexpected AVCs remain;
-11. Stage 1 enforcing, negative tests, AVC gating.
+0.0.3 (§38, D43) is done: run0 as confined admin, homed accounts, verity SYSTEM, A/B updates
+with rollback, signed extensions, scoped mutable `/etc`, SELinux Stage 1 enforcing with negative
+tests. It closed with the HEAD integration `snapshot-20261009.2312` (7/7 at HEAD, enforcing, no
+unexpected denials).
 
-0.0.3 is done: steps 1 to 11, each proven by a frozen cycle, then the HEAD integration
-`snapshot-20261009.2312` (7/7 at HEAD, enforcing, no unexpected denials).
+Current milestone: 0.0.4 (§39, D60), one green frozen cycle per step, then a HEAD integration:
+1. Python out of the base: no interpreter a user can run other than `/bin/sh` (GLib's
+   developer tools pulled Python in);
+2. `beamline-shell`, a C stub, as homed's default login shell (`/usr/libexec/beamline-shell`,
+   in `/etc/shells`);
+3. `posix` replaces the admin extension: POSIX.1-2024 mandatory + User Portability utilities
+   (uutils, then GNU, then others), bash, mandoc, named system tools; user-facing tools leave
+   the base; `policy/posix-utilities.txt` checked at build time;
+4. `printing-scanning`: CUPS, SANE, HPLIP leave the desktop (it keeps libcups); Avahi joins the
+   base;
+5. desktop-gnome without GNOME Shell extension support, and without `gjs`, `lua`, `wpexec`
+   where nothing regresses;
+6. desktop pruning: SSH server, LVM, iptables, plymouth, pppd, NetworkManager CLI (Samba stays);
+7. setuid audit: no setuid, setgid or file capabilities except `fusermount3` (own SELinux
+   domain); `newgrp`, `passwd`, `chsh`, ... leave;
+8. `posix-devel` replaces devel;
+9. the downstream systemd patch bounding transient units a session requests (D58).
+
+Composition (§5.1): base alone is healthy but not interactive; base + desktop is a desktop;
+base + `posix` is a UNIX server. Only administrators enable extensions; 0.0.4 has no toggle
+tool (`beamlinectl` comes later).
 
 Out of scope until later milestones: NetworkManager, the Hardware image, Secure Boot
 enforcement (UKIs are signed, but QEMU tests do not enforce it), a real RecoveryOS (a stub
@@ -141,7 +151,7 @@ refs or tag `snapshot-<id>`).
 
 ## Hard rules
 
-These are architectural invariants (§42). A change that breaks one is wrong even if it builds.
+These are architectural invariants (§43). A change that breaks one is wrong even if it builds.
 
 1. **No package manager, no DKMS** in any image (§2.1). `/usr` is generated, not administered.
 2. **Exact sources, tracked HEADs (§2.3, §31).** Every source has an immutable ref in
@@ -154,8 +164,10 @@ These are architectural invariants (§42). A change that breaks one is wrong eve
    override only when the build rules or tracking branch must change (`elements/overrides/`);
    project-owned element only for distribution policy (kernel, image composition, identity,
    configuration). Everything else follows FDSDK `master`.
-4. **Bash stays out of the base (§6).** `/usr/bin/sh -> dash`. Anything needing bash or
-   coreutils at runtime belongs in a sysext (`admin`, `devel`) — not in `base/`.
+4. **Bash stays out of the base (§6).** `/usr/bin/sh -> dash`, the only interpreter a user can
+   run in the base (§5.1): no Python, Perl, Lua or JavaScript runtime there. Anything needing
+   bash or coreutils at runtime belongs in a sysext (`posix`, `posix-devel`; `admin` until
+   0.0.4 step 3) — not in `base/`.
    **Coreutils that ship anywhere are uutils, as one multicall binary (§7.2).** GNU coreutils
    is allowed only as a build-time tool that never reaches an artifact
    (`image/integration-tools.bst`).
@@ -174,7 +186,8 @@ These are architectural invariants (§42). A change that breaks one is wrong eve
 10. **No credentials in images.** Root stays locked. Human accounts are systemd-homed users,
     never in the image: `tools/qemu-test.py` passes `home.create.dev` (wheel) and
     `home.create.alice` records, which `systemd-homed-firstboot` creates on the first boot
-    (D54). Test passwords equal the user names.
+    (D54). Test passwords equal the user names. Human accounts get no interactive shell by
+    default (`beamline-shell` from 0.0.4 step 2); test records set `/usr/bin/sh` explicitly.
 11. **Native builds only.** The image architecture equals the builder architecture.
 12. **Layer 0 stays boring (§31.3).** BuildStream, buildbox, the builder VM and the plugin
     junctions are pinned and change only deliberately, never inside an integration cycle.
@@ -200,6 +213,12 @@ These are architectural invariants (§42). A change that breaks one is wrong eve
 19. **The production boot enforces, and denials gate (security §15, §16, D59).** A cycle with a
     denial not listed in `policy/selinux-expected.toml` is red. Only a negative test may add an
     entry there; any other denial is fixed in the policy, the labels or the component.
+20. **Setuid-free (§22, security §11, D60).** No artifact contains setuid, setgid or
+    file-capability binaries, except `/usr/bin/fusermount3` (in its own SELinux domain) until a
+    setuid-free FUSE exists. Privilege comes from services under polkit and SELinux.
+21. **Extension contents follow an external specification where one exists (§7, D60).**
+    `posix` and `posix-devel` follow POSIX.1-2024 (`policy/posix-utilities.txt`), not a
+    hand-picked list.
 
 ## How to verify a change
 
@@ -399,10 +418,11 @@ Open items, in rough order:
   metadata (`mkfs.erofs --tar`, D31).
 - Integration automation at 0.1: scheduled cycles, publication to GitHub Releases, signed
   channel pointers, retention and promotion tooling (`edge`), and hosted aarch64 +
-  x86_64 runs (§17.4, §39). Until then, cycles are run by hand.
+  x86_64 runs (§17.4, §40). Until then, cycles are run by hand.
 - Kernel new-symbol reporting between snapshots (§11.3, §32).
 - A wheel member can start a transient unit with `systemd-run` instead of run0, which runs in
-  `init_t` instead of `admin_t` (security §9.4, D58). Needs a systemd change or a broker.
+  `init_t` instead of `admin_t` (security §9.4, D58). Planned fix: a downstream systemd patch,
+  later proposed upstream.
 - The disk image is not yet bit-reproducible: FDSDK's `mkfs.vfat` stamps the ESP's and
   XBOOTLDR's volume-label entry with the build time (D57). Everything else in it is.
 - Owner proposal for a later version, not scheduled: desktop-gnome without GNOME Shell

@@ -54,6 +54,9 @@ Current milestone: 0.0.3 (§38, D43), one green integration cycle per step:
 10. SELinux Stage 1 policy, still permissive, until no unexpected AVCs remain;
 11. Stage 1 enforcing, negative tests, AVC gating.
 
+0.0.3 is done: steps 1 to 11, each proven by a frozen cycle, then the HEAD integration
+`snapshot-20261009.2312` (7/7 at HEAD, enforcing, no unexpected denials).
+
 Out of scope until later milestones: NetworkManager, the Hardware image, Secure Boot
 enforcement (UKIs are signed, but QEMU tests do not enforce it), a real RecoveryOS (a stub
 until further notice), Qt/LXQt, the Server profile and self-hosted builds (deferred, around
@@ -118,6 +121,8 @@ shared directory (§23).
 ./ci/test-boot-entries  # three boots: production (default), development (enforcing=0), RecoveryOS stub
 ./ci/test-update    # boot `latest`, sysupdate to the candidate's channel over HTTP, then roll back
 ./ci/test-run0      # serial console: dev's run0 runs in admin_t, alice is refused, root cannot log in
+./ci/test-settings  # two boots: allowlisted /etc settings persist, anything else written to /etc does not
+./ci/test-security  # enforcing: the negative tests (P0, admin_t, the updater; policy/selinux-expected.toml)
 ./ci/test-extensions  # boot again, merge the admin extension on demand, use it
 ./ci/test-desktop   # boot with a virtual GPU: GNOME session, PipeWire, portal, Flatpak, screenshot
 ./ci/test-all       # all of the above, in order
@@ -192,6 +197,9 @@ These are architectural invariants (§42). A change that breaks one is wrong eve
 18. **run0 is the only escalation (§18.1, §19, D55).** su, sudo, pkexec and doas never ship
     (`check-policy.py` rejects them). Root has an invalid password and a nologin shell; polkit
     lets only wheel through run0, and run0 sessions run in `admin_t`.
+19. **The production boot enforces, and denials gate (security §15, §16, D59).** A cycle with a
+    denial not listed in `policy/selinux-expected.toml` is red. Only a negative test may add an
+    entry there; any other denial is fixed in the policy, the labels or the component.
 
 ## How to verify a change
 
@@ -259,6 +267,11 @@ rebuild of the image takes a few.
   (`include/image/permissions.yml`, D31). Add an entry there when a file needs a mode.
 - Files created with mode 0000 (e.g. `/etc/shadow` from sysusers) are unreadable to the
   unprivileged build sandbox; chmod them before packing.
+- The sandbox root is staged through buildbox-fuse: everything written there is slow and is
+  hashed into the CAS as action output. Elements that build images do their scratch work in
+  `%{image-scratch}` (`/tmp/work`, a tmpfs; `include/image/scratch.yml`, D57) and install only
+  the finished images. Not where a filesystem copies extended attributes (DATA's ext4): files in
+  the builder's tmpfs carry the builder's SELinux label.
 - When a boot misbehaves and login is impossible, inject a debug unit as a credential
   (`systemd.extra-unit.<name>.service` over SMBIOS, see `credential_args()` in
   `tools/qemu-test.py`) that runs `journalctl`/`systemctl --failed` with
@@ -276,7 +289,10 @@ rebuild of the image takes a few.
 - The initrd mounts DATA read-write (`sysroot-data.mount`, `sysroot-var.mount`) and merges
   `/etc`'s mutable layer before switch-root (D56). A setting outside the allowlist written into
   `/etc` survives only until the next boot; adding one means extending the allowlist unit, the
-  file contexts and the tmpfiles relabels together.
+  file contexts and the tmpfiles relabels together. Every later confext refresh (the host's
+  `systemd-confext.service`, `beamline-admin`) logs the kernel warning `overlayfs: upperdir is
+  in-use`: systemd mounts the new overlay before it unmounts the old one, which shares the
+  upper directory. Exactly one overlay remains on `/etc` afterwards.
 - QEMU on macOS has no vhost-vsock. Host↔guest test channels on macOS need another
   transport (serial, virtio-serial, or forwarded SSH).
 - systemd refuses system extensions stored under `/usr` (overlayfs `ELOOP`). Extension images
@@ -295,6 +311,17 @@ rebuild of the image takes a few.
   (`read -r c < /proc/1/attr/current`). The audit AVC records also name the file contexts.
 - The policy's classes and initial SIDs are generated from the kernel's headers
   (`kernel/selinux-headers.bst`, D35). Never add kernel classes to the CIL by hand.
+- The policy is split by integrity level (D58): `policy.cil` (types, attributes, named
+  transitions, assertions), `platform.cil`, `admin.cil`, `user.cil`; `kernel-cil.py` generates
+  the platform domains' broad rules. A service gets its own domain through an executable type,
+  a `typetransition` from `init_t` and a file context. Platform and admin domains can never
+  execute `beamline_untrusted_type` content, and only `sysext_t` may write SYSTEM's types:
+  secilc refuses a rule that breaks either assertion.
+- Denials reach the serial console twice over: `beamline-avc-report` prints the boot's,
+  `beamline-avc-follow` the rest. `tools/integrate.py` classifies them against
+  `policy/selinux-expected.toml`; a denial a negative test provokes must be listed there with
+  its reason, any other is unexpected. Services that write `/etc` at runtime show up as `init_t`
+  denials on `etc_t`: move their state to DATA (as for CUPS, D58) rather than allowing it.
 - Junction refs must be in `junction.refs`: BuildStream reads them in its first loading
   pass (plugins, includes from junctions), before `project.refs` exists for it.
 - `limactl shell` does not forward environment variables; pass values as arguments.
@@ -306,18 +333,17 @@ rebuild of the image takes a few.
 
 ## Status
 
-**HEAD conformity 7/7** (2026-10-09) at `snapshot-20261009.1334`, the HEAD integration after
-0.0.3 steps 1 to 6 and D53. `latest` is `snapshot-20261009.1654` (step 8), frozen at that
-source set (D49):
+**HEAD conformity 7/7** (2026-10-10). `latest` is `snapshot-20261009.2312`, the HEAD integration
+that closes 0.0.3:
 
 | Component | Tracking | Selected |
 |---|---|---|
 | Freedesktop SDK | `master` (newest CI-green) | `8090132` (26.08rc.2+355) |
-| gnome-build-meta | `master` (newest CI-green; GNOME recipes, D28) | `4c34fc4` (49-branchpoint+1329) |
-| Linux | `master` (GitHub archive of the commit, D32) | `af32da4` |
-| systemd | `main` (overrides: trimmed, SELinux; classic git source) | `v262-375-g25428cd` (runs as `263~devel`) |
+| gnome-build-meta | `master` (newest CI-green; GNOME recipes, D28) | `d3baf29` (49-branchpoint+1331) |
+| Linux | `master` (GitHub archive of the commit, D32) | `9a06d4b` |
+| systemd | `main` (overrides: trimmed, SELinux; classic git source) | `v262-384-g570c468` (runs as `263~devel`) |
 | dash | `master` (classic git source) | `v0.5.13.5` (master = tag) |
-| uutils | `main` (admin extension) | `0.12.0-362-g6b35c0b` |
+| uutils | `main` (admin extension) | `0.12.0-380-g7bc1eb6` |
 | SELinux userspace | `main` (build-time policy tools only) | `3.11-267-g5e0e5c8` |
 
 Beamline boots under QEMU/HVF to `BEAMLINE_BOOT_OK` in about 6 s, with no `[FAILED]` units.
@@ -331,10 +357,14 @@ created at build time; human accounts are systemd-homed users (LUKS2 with btrfs 
 created on the first boot from the test tool's `home.create.*` credentials (D54). `/etc` is
 read-only except an allowlist of system settings (hostname, machine-info, timezone, locale,
 keymap, machine ID) in a mutable confext layer on DATA, which the initrd rebuilds from the
-allowlist and merges before PID 1 starts (D56). SELinux Stage 0 is active: the Beamline CIL policy (MCS) loads, permissive,
-SYSTEM-A is labelled by mkfs.erofs, PID 1 runs in `init_t` and login shells in `user_t`,
-and each manifest records the VM tests' AVC denials (recorded per snapshot in its manifest, nearly
-all from the desktop session's `user_t`, which Stage 0 leaves without rules). The
+allowlist and merges before PID 1 starts (D56). SELinux Stage 1 enforces on the production
+boot (D58, D59); the development UKI is permissive. Platform domains (`init_t`, the settings
+services, `sysupdate_t`, `homed_t`, `sysext_t`) never execute content a lower level can write,
+run0 sessions run in a confined `admin_t`, and sessions (login, GDM, the user manager) in
+`user_t`. SYSTEM-A is labelled by mkfs.erofs, the homed homes when their user manager starts.
+Every denial of every VM test is recorded in the manifest and classified against
+`policy/selinux-expected.toml`; a cycle with an unexpected one is red. `ci/test-security` runs
+the negative tests (D59). The
 desktop-gnome extension (GNOME Shell, GDM, Settings, Nautilus, File Roller,
 Software, PipeWire, portals, Flatpak) merges from DATA at boot, as a signed verity image built
 with this snapshot (D50); `ci/test-desktop` checks
@@ -358,12 +388,7 @@ move rebuilds the GNOME parts it touches locally (GNOME is built against Beamlin
 D28).
 
 Open items, in rough order:
-- 0.0.3, the steps above (D43).
-- Stage 1 inputs:
-  - the 471 recorded `user_t` denials;
-  - util-linux's SELinux support (D30), if enforcement needs it;
-  - the full kernel class map with `handleunknown deny` (D35).
-  gjs keeps its JIT: `user_t` is P0 and keeps `execmem` (security §16).
+- util-linux's SELinux support (D30), if enforcement needs it.
 - Upstream reports:
   - `git_repo` re-downloads history when tracking a branch (D32);
   - `cargo2` cannot load without a ref under `project.refs` (D36);
@@ -376,6 +401,10 @@ Open items, in rough order:
   channel pointers, retention and promotion tooling (`edge`), and hosted aarch64 +
   x86_64 runs (§17.4, §39). Until then, cycles are run by hand.
 - Kernel new-symbol reporting between snapshots (§11.3, §32).
+- A wheel member can start a transient unit with `systemd-run` instead of run0, which runs in
+  `init_t` instead of `admin_t` (security §9.4, D58). Needs a systemd change or a broker.
+- The disk image is not yet bit-reproducible: FDSDK's `mkfs.vfat` stamps the ESP's and
+  XBOOTLDR's volume-label entry with the build time (D57). Everything else in it is.
 - Owner proposal for a later version, not scheduled: desktop-gnome without GNOME Shell
   extension support, and `desktop-gnome-advanced` as a separate extension with that support.
   The two are alternatives, never layered (D51).

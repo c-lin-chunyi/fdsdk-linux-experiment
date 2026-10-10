@@ -41,7 +41,7 @@ esac
 if "$REPO/ci/check" && "$REPO/ci/build" && "$REPO/ci/test-base" && "$REPO/ci/image" \
     && "$REPO/ci/boot" && "$REPO/ci/test-reboot" && "$REPO/ci/test-verity" \
     && "$REPO/ci/test-boot-entries" && "$REPO/ci/test-update" \
-    && "$REPO/ci/test-run0" && "$REPO/ci/test-settings" \
+    && "$REPO/ci/test-run0" && "$REPO/ci/test-settings" && "$REPO/ci/test-security" \
     && "$REPO/ci/test-extensions" && "$REPO/ci/test-desktop"; then
     # shellcheck disable=SC2086
     in_builder python3 tools/integrate.py --arch "$ARCH" record --result green $no_commit

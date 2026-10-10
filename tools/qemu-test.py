@@ -64,12 +64,14 @@ FIRMWARE_VARS = {
 }
 
 # A green boot reaches the marker without any failed unit (docs/spec.md §17.1): systemd's
-# [FAILED]/[DEPEND] status lines count as failures, not just panics.
+# [FAILED]/[DEPEND] status lines count as failures, not just panics, and so does an ordering
+# cycle, which systemd breaks by silently skipping a unit.
 FAILURE_PATTERNS = [
     re.compile(r"Kernel panic - not syncing"),
     re.compile(r"You are in emergency mode"),
     re.compile(r"^\[FAILED\] "),
     re.compile(r"^\[DEPEND\] "),
+    re.compile(r"Ordering cycle found"),
 ]
 
 # systemd colours its status column; match against the plain text.
@@ -388,6 +390,9 @@ def tamper(image, overlay, label, arch):
     print(f"qemu-test: tampered with {label} at byte {offset} (overlay only)", file=sys.stderr)
 
 
+CONSOLE_SETTLE = 2.0  # seconds of console read after the result is known
+
+
 def run_test(cmd, args, workdir=None):
     log = open(args.log, "w", encoding="utf-8") if args.log else None
     expect = re.compile(args.expect)
@@ -468,6 +473,10 @@ def run_test(cmd, args, workdir=None):
         time.sleep(args.screendump_delay)
         result["status"] = screendump(workdir, args.screendump)
 
+    # The console trails the marker: SELinux denials reported just before it may still be on
+    # their way (beamline-avc-follow.service). Keep reading briefly before stopping QEMU.
+    if result["status"] is not None and proc.poll() is None:
+        time.sleep(CONSOLE_SETTLE)
     if proc.poll() is None:
         proc.terminate()
         try:

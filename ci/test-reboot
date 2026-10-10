@@ -19,6 +19,6 @@ python3 "$REPO/tools/qemu-test.py" --arch "$ARCH" --image "$image" --reboot \
     --extra-unit "$REPO/tests/vm/beamline-previous-boot.service" \
     --wants beamline-reboot-once.service --wants beamline-previous-boot.service \
     --kernel-arg systemd.mask=systemd-sysext.service \
-    --kernel-arg systemd.mask=systemd-confext.service \
+    --kernel-arg systemd.mask=beamline-extensions-link.service \
     --require BEAMLINE_BOOT_OK --expect BEAMLINE_PREVIOUS_BOOT_OK \
     --log "$(dirname "$image")/serial-reboot.log"

@@ -1,0 +1,122 @@
+# SPDX-License-Identifier: MIT
+#
+# Expected SELinux denials (docs/security.md §15, §16; docs/decisions.md D58). Only the
+# negative tests may provoke a denial, and each denial they provoke is listed here with its test
+# and reason. Every other denial an integration cycle records is unexpected: Stage 1 permissive
+# (0.0.3 step 10) reports them, Stage 1 enforcing (step 11) fails the cycle on them.
+#
+# A denial matches an entry when its source domain, target type and class are equal, its
+# permissions are among `perms`, and, when the entry names one, its command is `comm`:
+#
+#   [[denial]]
+#   scontext = "user_t"
+#   tcontext = "etc_t"
+#   tclass = "file"
+#   perms = ["write", "open"]
+#   comm = "sh"
+#   test = "ci/test-security"
+#   reason = "P0 writes a file outside /etc's allowlist"
+#
+# ci/test-settings writes a file outside the allowlist into /etc (security §9.5). The writer is
+# checked first; overlayfs then creates the file in the mutable layer with the credentials of the
+# overlay's mounter, the initrd's merge, which counts as kernel_t.
+[[denial]]
+scontext = "init_t"
+tcontext = "etc_t"
+tclass = "file"
+perms = ["create", "write", "open"]
+comm = "systemd-tmpfile"
+test = "ci/test-settings"
+reason = "a platform service writes /etc/beamline-forbidden, outside /etc's allowlist"
+
+[[denial]]
+scontext = "kernel_t"
+tcontext = "etc_t"
+tclass = "file"
+perms = ["create", "write", "open"]
+comm = "systemd-tmpfile"
+test = "ci/test-settings"
+reason = "the same write, as overlayfs repeats it in the mutable layer for the overlay's mounter"
+
+# ci/test-security (tests/vm/security-check.sh). Checks that must be refused run as root, so that
+# SELinux is what refuses them.
+[[denial]]
+scontext = "user_t"
+tcontext = "etc_t"
+tclass = "file"
+perms = ["append", "write", "open"]
+comm = "sh"
+test = "ci/test-security"
+reason = "p0-writes-etc: P0, as root, appends to /etc/pam.d/login, outside /etc's allowlist"
+
+[[denial]]
+scontext = "user_t"
+tcontext = "etc_t"
+tclass = "dir"
+perms = ["write", "add_name"]
+comm = "sh"
+test = "ci/test-security"
+reason = "p0-writes-etc: the same write, as overlayfs prepares the copy-up into the mutable layer"
+
+[[denial]]
+scontext = "user_t"
+tcontext = "user_t"
+tclass = "capability"
+perms = ["dac_override", "dac_read_search", "fowner"]
+comm = "sh"
+test = "ci/test-security"
+reason = "P0 checks run as root, and user_t has no capabilities"
+
+[[denial]]
+scontext = "admin_t"
+tcontext = "etc_t"
+tclass = "file"
+perms = ["append", "write", "open"]
+comm = "sh"
+test = "ci/test-security"
+reason = "admin-writes-etc: admin_t appends to /etc/pam.d/login, outside /etc's allowlist"
+
+[[denial]]
+scontext = "user_t"
+tcontext = "sysupdate_t"
+tclass = "process"
+perms = ["transition"]
+comm = "sh"
+test = "ci/test-security"
+reason = "p0-enters-sysupdate: P0 sets /proc/self/attr/exec to the updater's domain and executes"
+
+[[denial]]
+scontext = "user_t"
+tcontext = "admin_t"
+tclass = "process"
+perms = ["transition"]
+comm = "sh"
+test = "ci/test-security"
+reason = "p0-enters-admin: P0 sets /proc/self/attr/exec to admin_t and executes"
+
+[[denial]]
+scontext = "sysupdate_t"
+tcontext = "tmp_t"
+tclass = "file"
+perms = ["execute", "execute_no_trans", "map"]
+comm = "sh"
+test = "ci/test-security"
+reason = "updater-runs-tmp-helper: the updater executes /var/tmp/p0-elf"
+
+[[denial]]
+scontext = "admin_t"
+tcontext = "security_t"
+tclass = "file"
+perms = ["write", "open"]
+comm = "setenforce"
+test = "ci/test-security"
+reason = "admin-setenforce: admin_t writes 0 to /sys/fs/selinux/enforce"
+
+[[denial]]
+scontext = "admin_t"
+tcontext = "admin_t"
+tclass = "capability"
+perms = ["sys_module"]
+comm = "insmod"
+test = "ci/test-security"
+reason = "admin-loads-module: admin_t loads a kernel module"

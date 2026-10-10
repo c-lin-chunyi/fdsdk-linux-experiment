@@ -108,8 +108,9 @@ config:
       "/usr/lib/systemd/boot/efi/systemd-boot%{efi-arch}.efi"
     chmod 0644 "%{install-root}/esp/EFI/BOOT/${boot_name}" "%{uki-dir}"/*.efi
     # The newest production UKI is the default; the development and recovery entries are
-    # picked from the menu (or bootctl set-oneshot).
-    printf 'timeout 0\nconsole-mode keep\ndefault %{os-id}_*\n' > "%{install-root}/esp/loader/loader.conf"
+    # picked from the menu (or bootctl set-oneshot). The command-line editor is off: the
+    # production UKI's command line is signed and enforcing (docs/security.md §19.5).
+    printf 'timeout 0\nconsole-mode keep\neditor no\ndefault %{os-id}_*\n' > "%{install-root}/esp/loader/loader.conf"
 
   - |
     # systemd-sbsign cannot verify; sbsigntools can. Every image must carry a signature

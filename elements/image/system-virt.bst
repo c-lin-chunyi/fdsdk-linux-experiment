@@ -7,10 +7,12 @@ description: |
   dm-verity hash tree. systemd-repart builds both offline and splits them out:
   system.root.raw, system.root-verity.raw, and system.json, whose root hash
   image/uki-virt.bst puts into the signed command line. File modes BuildStream cannot carry
-  are restored on a copy of the tree first (docs/decisions.md D31).
+  are restored on a copy of the tree first (docs/decisions.md D31), in %{image-scratch} outside
+  the FUSE-staged sandbox root (D57).
 
 (@):
 - include/image/permissions.yml
+- include/image/scratch.yml
 
 build-depends:
 - junctions/freedesktop-sdk.bst:public-stacks/runtime-gnu.bst
@@ -32,16 +34,16 @@ environment:
   SOURCE_DATE_EPOCH: '%{source-date-epoch}'
   # SYSTEM is labelled when it is created (docs/security.md §19.1); repart passes this to
   # mkfs.erofs.
-  SYSTEMD_REPART_MKFS_OPTIONS_EROFS: --file-contexts=/work/root/etc/selinux/beamline/contexts/files/file_contexts
-  TMPDIR: /work/tmp
+  SYSTEMD_REPART_MKFS_OPTIONS_EROFS: --file-contexts=%{image-scratch}/root/etc/selinux/beamline/contexts/files/file_contexts
+  TMPDIR: '%{image-scratch}/tmp'
 
 config:
   commands:
   - |
-    mkdir -p /work/tmp
-    cp -a /sysroot /work/root
+    mkdir -p "%{image-scratch}/tmp"
+    cp -a /sysroot "%{image-scratch}/root"
     %{apply-permissions}
-    apply_permissions /work/root
+    apply_permissions "%{image-scratch}/root"
 
   - |
     systemd-repart \
@@ -51,12 +53,12 @@ config:
       --size=auto \
       --seed=%{system-seed} \
       --definitions="%{datadir}/%{os-id}/repart/system" \
-      --copy-source=/work/root \
+      --copy-source="%{image-scratch}/root" \
       --split=yes \
       --json=pretty \
-      /work/system.raw > /work/system.json
-    install -m644 -t "%{install-root}" /work/system.json \
-      /work/system.root.raw /work/system.root-verity.raw
+      "%{image-scratch}/system.raw" > "%{image-scratch}/system.json"
+    install -m644 -t "%{install-root}" "%{image-scratch}/system.json" \
+      "%{image-scratch}/system.root.raw" "%{image-scratch}/system.root-verity.raw"
     python3 - "%{install-root}/system.json" <<'EOF'
     import json, sys
     # Both partitions of the verity set report its root hash.

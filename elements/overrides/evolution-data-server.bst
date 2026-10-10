@@ -5,7 +5,7 @@
 # path to WebKitGTK and JavaScriptCoreGTK in the desktop. GNOME Online Accounts signs in
 # through the browser instead.
 #
-# Copied from: gnome-build-meta 4c34fc4efb47d8fdaf2e038d5dbdf997e85bda12
+# Copied from: gnome-build-meta d3baf292261e37c87aa7597aeceaacff06875707
 #   elements/core-deps/evolution-data-server.bst
 # Changes from the original: the source ref lives in project.refs (ref-storage),
 # dependencies carry junction prefixes, gbm's recc include is replaced by its gcc

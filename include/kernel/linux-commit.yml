@@ -5,4 +5,4 @@
 # commit; its sha256 is the ref in project.refs.
 
 variables:
-  linux-commit: af32da41b0327b9c6a37856ba82b6760d6c8d10e
+  linux-commit: 9a06d4b7c5feedea819a00af0db1629e43f3def4

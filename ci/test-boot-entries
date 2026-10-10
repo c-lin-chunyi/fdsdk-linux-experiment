@@ -17,7 +17,7 @@ python3 "$REPO/tools/qemu-test.py" --arch "$ARCH" --image "$image" --reboot \
     --extra-unit "$REPO/tests/vm/beamline-boot-entries.service" \
     --wants beamline-boot-entries.service \
     --kernel-arg systemd.mask=systemd-sysext.service \
-    --kernel-arg systemd.mask=systemd-confext.service \
+    --kernel-arg systemd.mask=beamline-extensions-link.service \
     --require BEAMLINE_ENTRY_PRODUCTION_OK --require BEAMLINE_ENTRY_DEVELOPMENT_OK \
     --expect BEAMLINE_RECOVERY_STUB \
     --log "$(dirname "$image")/serial-boot-entries.log"

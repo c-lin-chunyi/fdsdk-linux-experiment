@@ -12,11 +12,13 @@
 # key (docs/decisions.md D50). The level is the snapshot identifier (docs/spec.md §8), so an
 # image merges only into the SYSTEM built with it. The element build-depends on systemd,
 # image/repart-extension.bst and security/keys-verity.bst.
-# %{extension-presets} true applies system and user presets to a copy of the merged tree
-# first, so unit enablement ships in the confext.
+# %{extension-presets} true applies system and user presets to the staged merged tree first,
+# so unit enablement ships in the confext. Intermediate trees and images live in
+# %{image-scratch}, outside the FUSE-staged sandbox root (docs/decisions.md D57).
 
 (@):
 - include/image/permissions.yml
+- include/image/scratch.yml
 
 variables:
   strip-binaries: ''
@@ -45,47 +47,48 @@ environment:
 config:
   commands:
   - |
-    tree=/tree
     if [ "%{extension-presets}" = true ]; then
-      mkdir -p /work
-      cp -a /tree /work/merged
-      systemctl --root=/work/merged preset-all
-      systemctl --root=/work/merged --global preset-all
-      tree=/work/merged
+      # On the staged tree itself: the sandbox is thrown away, only the images are kept.
+      systemctl --root=/tree preset-all
+      systemctl --root=/tree --global preset-all
     fi
     python3 "%{image-tools}/build-extension.py" --name "%{extension-name}" \
-      --tree "${tree}" --base /base --content-tree /reference/content \
+      --tree /tree --base /base --content-tree /reference/content \
       --exclude-tree /reference/tools %{extension-exclude} \
       %{extension-regenerated} \
       --os-id "%{os-id}" --level "%{extension-level}" --architecture "%{extension-arch}" \
-      --out /work
+      --out "%{image-scratch}"
 
   - |
     %{apply-permissions}
     trees=""
     for kind in sysext confext; do
-      if [ -d "/work/${kind}" ]; then apply_permissions "/work/${kind}"; trees="${trees} /work/${kind}"; fi
+      if [ -d "%{image-scratch}/${kind}" ]; then
+        apply_permissions "%{image-scratch}/${kind}"
+        trees="${trees} %{image-scratch}/${kind}"
+      fi
     done
     python3 "%{image-tools}/check-policy.py" --artifact ${trees}
 
   - |
-    mkdir -p /work/tmp
+    mkdir -p "%{image-scratch}/tmp"
     for kind in sysext confext; do
-      [ -d "/work/${kind}" ] || continue
+      [ -d "%{image-scratch}/${kind}" ] || continue
       # Seeded from the image's own UUID, so the partition UUIDs repart does not derive from
       # the root hash are reproducible.
-      TMPDIR=/work/tmp \
+      TMPDIR="%{image-scratch}/tmp" \
       SYSTEMD_REPART_MKFS_OPTIONS_EROFS=--file-contexts=/base/etc/selinux/beamline/contexts/files/file_contexts \
       systemd-repart \
         --offline=yes \
         --dry-run=no \
         --empty=create \
         --size=auto \
-        --seed="$(cat "/work/uuid-${kind}")" \
+        --seed="$(cat "%{image-scratch}/uuid-${kind}")" \
         --definitions="%{datadir}/%{os-id}/repart/extension" \
-        --copy-source="/work/${kind}" \
+        --copy-source="%{image-scratch}/${kind}" \
         --private-key="%{verity-keys}/verity.key" \
         --certificate="%{verity-keys}/verity.crt" \
-        "%{install-root}/%{extension-name}.${kind}.raw"
+        "%{image-scratch}/%{extension-name}.${kind}.raw"
+      install -m644 -t "%{install-root}" "%{image-scratch}/%{extension-name}.${kind}.raw"
     done
     ls -la "%{install-root}"

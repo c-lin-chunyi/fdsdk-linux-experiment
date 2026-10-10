@@ -27,6 +27,13 @@ if [ ! -d "$snapshots/$old/update" ]; then
     exit 0
 fi
 new="$(cd "$channel" && for f in beamline_*.efi; do v="${f#beamline_}"; echo "${v%.efi}"; done)"
+if [ "$new" = dev ]; then
+    # Outside an integration cycle the candidate's version is `dev`, which version ordering puts
+    # before every snapshot (digits sort after letters): sysupdate finds nothing newer.
+    log "update: SKIPPED, the candidate is a development build (dev); integration cycles run this test"
+    echo "SKIPPED: the candidate is a development build (dev); integration cycles run this test" > "$log_file"
+    exit 0
+fi
 [ "$new" != "$old" ] || die "the candidate has the same version as latest ($old)"
 log "update: $old -> $new, then rollback"
 

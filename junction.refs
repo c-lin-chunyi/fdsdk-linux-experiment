@@ -7,4 +7,4 @@ projects:
     junctions/freedesktop-sdk.bst:
     - ref: freedesktop-sdk-26.08rc.2-355-g809013202493a2676672959850587e5013ae59e4
     junctions/gnome-build-meta.bst:
-    - ref: 49-branchpoint-1329-g4c34fc4efb47d8fdaf2e038d5dbdf997e85bda12
+    - ref: 49-branchpoint-1331-gd3baf292261e37c87aa7597aeceaacff06875707

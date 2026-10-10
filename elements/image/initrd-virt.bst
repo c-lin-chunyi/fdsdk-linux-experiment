@@ -5,10 +5,12 @@ description: |
   systemd-native initrd (docs/spec.md §13, §36), built the way mkosi-initrd does it: a
   trimmed copy of the Virt root plus /etc/initrd-release, packed as a zstd cpio. systemd
   runs initrd.target, mounts root= and switches root; no dracut hooks or shell scripts.
-  The Virt kernel has its boot path built in, so no kernel modules are included.
+  The Virt kernel has its boot path built in, so no kernel modules are included. The tree is
+  trimmed in %{image-scratch}, outside the FUSE-staged sandbox root (docs/decisions.md D57).
 
 (@):
 - include/image/permissions.yml
+- include/image/scratch.yml
 
 build-depends:
 - junctions/freedesktop-sdk.bst:public-stacks/runtime-gnu.bst
@@ -24,8 +26,8 @@ build-depends:
 config:
   commands:
   - |
-    tree=/work/initrd
-    mkdir -p /work
+    tree="%{image-scratch}/initrd"
+    mkdir -p "%{image-scratch}"
     cp -a /sysroot "${tree}"
 
     # Not needed to find and mount the root filesystem.
@@ -69,7 +71,10 @@ config:
     ln -sf usr/lib/systemd/systemd "${tree}/init"
 
   - |
-    cd /work/initrd
+    cd "%{image-scratch}/initrd"
+    # The trimming above gave the directories it changed the build's time. Clamp every
+    # timestamp to the source date, so the initrd (and with it the UKIs) is reproducible.
+    find . -newermt "@%{source-date-epoch}" -exec touch -h -d "@%{source-date-epoch}" {} +
     find . -mindepth 1 | LC_ALL=C sort \
       | cpio --quiet --reproducible -o -H newc \
       | zstd -q -19 -T0 > "%{install-root}/initrd"

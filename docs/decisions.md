@@ -1177,7 +1177,10 @@ the step.
     `initrd-root-fs.target`, and the stock merge unit runs before that target. The mounts move
     to the host at switch-root.
   - The host's `systemd-confext.service` still refreshes `/etc` with the same layer and the
-    linked confext images (D50).
+    linked confext images (D50). Every refresh after the initrd's merge logs the kernel
+    warning `overlayfs: upperdir is in-use`. systemd builds the new overlay in a private
+    namespace before it unmounts the old one, which shares the upper directory. Afterwards
+    exactly one overlay is on `/etc` (checked on snapshot 20261009.1803).
 - **First-boot growth** is unchanged: the host's systemd-repart grows the mounted DATA
   partition, and `systemd-growfs@data` (from fstab, ordered after repart) grows the mounted
   filesystem.
@@ -1223,3 +1226,280 @@ the step.
     (permissive lets it into the layer), and reboots.
   - The second boot must have the kernel hostname already set by PID 1, the other settings
     back, and no `beamline-forbidden` in `/etc` or the layer.
+
+## D57. Image elements work in the sandbox's tmpfs
+
+Build infrastructure, no spec change. Image builds were slow because of where they wrote, not
+what they ran.
+- **The cause.**
+  - The builder's buildbox-casd stages every sandbox root through buildbox-fuse, a userspace
+    FUSE filesystem. It does so whenever buildbox-fuse is installed: the runner's
+    `--staging-mode=default` prefers FUSE.
+  - Image elements did their scratch work in `/work` on that root, so every intermediate tree
+    and image went through FUSE, and was then hashed into the CAS as action output.
+  - Measured on the desktop-gnome extension, against the same steps in RAM:
+
+    | Step | FUSE root | RAM |
+    |---|---|---|
+    | copy of the 3.5 GB merged tree | 36 s | 14 s |
+    | split into sysext/confext trees | 46 s | 13 s |
+    | repart (EROFS, verity, signature) | 101 s | 7 s |
+
+    Capturing the output added 39 s. The builder disk's btrfs zstd compression costs only
+    about 30% on writes.
+- **The change.**
+  - The sandbox's `/tmp` is a tmpfs: no FUSE, never captured. `include/image/scratch.yml`
+    sets `%{image-scratch}` (`/tmp/work`). `include/extension.yml`, `image/system-virt.bst` and
+    `image/initrd-virt.bst` build intermediate trees and images there; only the finished
+    images are installed into `%{install-root}`.
+  - `image/disk-virt.bst` stays on the FUSE root. The builder's kernel labels files in its
+    tmpfs with the builder's own SELinux context, and `mkfs.ext4 -d` copies every extended
+    attribute into DATA: the image then carried the build host's label
+    (`unconfined_u:object_r:user_tmp_t:s0`, "not valid" under Beamline's policy). EROFS images
+    are unaffected because mkfs.erofs labels from the file contexts, and cpio carries no
+    attributes. Files on the FUSE root carry none.
+  - The desktop extension applies its presets to the staged `/tree` itself instead of a copy.
+- **Result.**
+
+  | Element | Before | After |
+  |---|---|---|
+  | desktop-gnome | 4:14 | 1:26 |
+  | SYSTEM | 59 s | 21 s |
+  | initrd | 49 s | 34 s |
+  | admin | 47 s | 35 s |
+
+  The extension and SYSTEM images came out byte-identical.
+- **Memory.** Scratch lives in RAM while an element builds. The desktop extension's peak is
+  about 4.3 GB (the split trees and the image); the builder VM has 31 GB.
+- **Labels.** Anything built from a scratch tree into a filesystem that copies extended
+  attributes picks up the builder's labels. Use scratch only where the label comes from the
+  file contexts or the format stores none.
+- **Reproducibility.**
+  - Comparing the images found that the initrd recorded the build time as the mtime of every
+    directory its trimming changed, so no two builds of the initrd or the UKIs matched.
+    `image/initrd-virt.bst` now clamps timestamps to `SOURCE_DATE_EPOCH` before packing; two
+    builds of the initrd and UKIs are now identical.
+  - One nondeterminism remains, and it predates this change. FDSDK's `mkfs.vfat` stamps the
+    volume-label entry with the current time and ignores `SOURCE_DATE_EPOCH`, so 2 bytes
+    differ in the ESP and in XBOOTLDR between builds.
+- **Rejected.** A `buildbox-run` wrapper with `--staging-mode=copy-or-link` would also avoid
+  FUSE, for every element. It changes Layer 0 (§31.3), and hardlink staging lets a build that
+  writes a staged file in place corrupt the CAS object it is linked to.
+
+## D58. Stage 1 policy, still permissive
+
+0.0.3 step 10 (security §16). The policy is now organised by integrity level, and every VM
+test ends with zero unexpected denials. It is still permissive; step 11 enforces it.
+
+- **Seeing every denial first.**
+  - The Stage 0 manifests were incomplete. `beamline-avc-report.service` printed the denials
+    once, at boot, so nothing from a later session reached the console: not the run0 test,
+    not the desktop test's own login. The 473 recorded denials were the greeter's and the
+    boot's.
+  - The report now writes a journal cursor, and `beamline-avc-follow.service` continues from it
+    for the rest of the boot. `tools/qemu-test.py` reads the console for two more seconds after
+    a test's result is known.
+  - The follow unit's first version was wanted by `multi-user.target` without being ordered
+    after it. systemd orders a target after the units it wants, and the report is ordered after
+    the target, so this was a cycle, which systemd broke by skipping the follow unit in every
+    permissive boot. The first permissive runs therefore looked nearly clean. One boot with
+    `enforcing=1` showed what they had missed: login shells could not enter `user_t`, and the
+    homes were unlabelled (below). The follow unit is now ordered after `multi-user.target`, and
+    the harness fails a boot on `Ordering cycle found`, like a failed unit.
+- **Structure.**
+  - `policy.cil` holds the attributes, types, named transitions and assertions.
+  - `platform.cil`, `admin.cil` and `user.cil` hold the domains.
+  - `kernel.cil` (generated) holds the classes and the platform domains' broad rules.
+  - `handleunknown deny`: `kernel.cil` declares the kernel's full class map, and the
+    userspace object managers' classes (dbus, service, systemd's system permissions) are
+    declared.
+- **Platform domains.**
+  - `kernel_t` and `init_t`, plus `hostnamed_t`, `timedated_t` and `localed_t` (the settings
+    writers), `sysupdate_t` (systemd-sysupdate and systemd-sysupdated), `homed_t`
+    (systemd-homed and systemd-homework) and `sysext_t` (systemd-sysext and
+    systemd-confext), each entered from `init_t` through its executable's type.
+  - Other services stay in `init_t` until Stage 2. Every platform domain keeps the Stage 0
+    rules, except that it may never execute content a lower level can write.
+- **`sysext_t`, not in the plan.**
+  - Stage 0's records showed the merges writing SYSTEM types. Building a merged hierarchy
+    gives the mutable layer's root on DATA `etc_t`, the `/usr` metadata in the tmpfs workspace
+    `usr_t`, and makes overlayfs probe the work directory with files of those types. D56's
+    assertions forbade all of that to every domain.
+  - The merger is now the one domain exempt from them. It is also the overlays' mounter, so
+    overlayfs performs copy-up on DATA with its credentials, after checking the writing
+    process's.
+  - The overlay the initrd mounts has no mounter label until the policy loads, so it counts as
+    `kernel_t` until the host's refresh replaces it.
+  - When overlayfs copies a file up it also sets the upper parent directory's timestamps, with
+    the mounter's credentials. So the mounters, `sysext_t` and `kernel_t`, are the only domains
+    that may set attributes on immutable directories. Creating, removing, renaming or relabelling
+    one remains the merger's alone.
+- **The root of `/etc`'s layer.** It is the merged `/etc`'s root, so its label decides what a
+  process creating a file directly in `/etc` gets. The initrd creates it before any policy is
+  loaded, and systemd-confext relabels it only when it merges an extension. Without one, `/etc`
+  stayed `unlabeled_t` all boot, and confined domains could not search it. The initrd's rebuild
+  now sets `etc_t` itself with a tmpfiles `t` line: until a policy is loaded, root may set any
+  label.
+  - The base tests masked `systemd-confext.service` to keep the extensions out, so they never
+    ran the host's refresh of `/etc` that production boots run. They mask
+    `beamline-extensions-link.service` instead, as `ci/test-settings` already did.
+- **Untrusted content.**
+  - `beamline_untrusted_type` covers DATA's types, homes, `/tmp`, `/run` (with
+    `/run/user/<uid>` as `user_runtime_t`), `tmpfs_t` (`/dev/shm`, memfds), the ESP, the settings
+    files and unlabelled files.
+  - A neverallow keeps platform and admin domains from executing any of it.
+- **Filesystem labels.**
+  - EROFS is `system_fs_t`, ext4 and btrfs `data_fs_t`, overlay `overlay_fs_t`. btrfs had no
+    `fsuse` rule before, so the homed homes were unlabelled.
+  - SYSTEM code types (all immutable types but `etc_t`) may associate only with the EROFS,
+    overlay and tmpfs labels, and a neverallow forbids `data_fs_t`. Whatever label a process
+    chooses, an executable labelled as platform code cannot be created on DATA.
+- **`admin_t`** (P2, run0) may:
+  - read the system and execute SYSTEM code;
+  - manage units through PID 1 (the `service` class);
+  - reach the platform's D-Bus and varlink services and the journal;
+  - change the allowlisted settings, and its own temporary and runtime files.
+
+  Assertions keep it from:
+  - `sys_module`, `sys_rawio`, `mac_admin` and `mac_override`;
+  - module loading and `execmem`;
+  - writes to `/proc`, `/sys` and the other kernel interfaces, where a tunable can name a
+    usermode helper the kernel runs;
+  - raw block device writes;
+  - mounting, and mounts over SYSTEM's types;
+  - tracing platform processes.
+- **`user_t`** (P0) is free with its own data (homes, `/tmp`, its runtime directory, memfds,
+  the greeter's directories), its processes, user namespaces and the mounts inside them. It
+  reads and executes the system and talks to the platform through sockets, D-Bus and PID 1's
+  status. It keeps `execmem` (security §8.4); its user manager's BPF probes are dontaudited
+  (security §11).
+- **Homes.** systemd-homework creates each home's btrfs without labels, so a home's root was
+  `unlabeled_t`, and everything a session created below it inherited that.
+  - A `user@.service` drop-in relabels the mounted homes' roots from the file contexts
+    (`z /home/*`) as root before the user manager starts: `user_home_dir_t`.
+  - Type transitions make what `user_t` creates below a home's root `user_home_t`.
+  - `%h` cannot be used there: in a system unit it is the service manager's home, `/root`.
+- **Entering `user_t`.** pam_selinux gives login's shell and GDM's session `user_t` through
+  `bin_t`, and the user manager through `init_exec_t`; both are entrypoints.
+- **Writability probes.** Services ask access(2) whether a file is writable; fwupd, for one,
+  asks about its configuration and then changes its mode. On immutable types the answer is no
+  in an enforcing boot, so platform and admin domains `dontaudit` the `audit_access` checks on
+  them. Writes themselves are still audited. fwupd's configuration ships 0640, the mode it
+  insists on.
+- **Labels that were wrong.**
+  - PID 1 labels the cgroup directories it creates from the file contexts. Without an
+    entry they were `default_t`; `/sys/fs/cgroup` is now `cgroup_t`.
+  - `/dev/shm` was `device_t`.
+  - `/data/...` paths had no contexts below the top directories.
+  - The homed images (`/home/<user>.home`) matched the home directory entry. They are
+    `data_t` now.
+  - pidfs had no label.
+  - GDM creates `/var/lib/gdm` and `/run/gdm` itself, so named type transitions give them
+    `xdm_var_lib_t` and `xdm_runtime_t`.
+  - Named transitions also give the allowlisted settings, `/etc/.pwd.lock` (systemd-firstboot)
+    and `/etc/.updated` (systemd-update-done) their types whoever creates them. The last two
+    are `etc_runtime_t`, which the next boot's rebuild drops.
+- **Services that wrote `/etc`.**
+  - `ldconfig.service` is masked in SYSTEM. systemd-sysext stamps the merged `/usr` with
+    the merge time, so `ConditionNeedsUpdate=/etc` held on every boot with an extension, and
+    ldconfig rewrote `/etc/ld.so.cache`. The root's cache is built with the image and each
+    extension's confext carries its own (D36), so nothing needs it at runtime.
+  - CUPS keeps its state and both configuration files on DATA. cupsd writes its ServerRoot
+    (queues, PPDs, certificates) and the printcap, and corrects `cupsd.conf`'s and
+    `cups-files.conf`'s ownership to root:lp, which the image cannot carry (D31).
+    `cups-files.conf` sets `ServerRoot /var/lib/cups` and the printcap there. tmpfiles copies
+    both files to `/var/lib/cups` once, and a drop-in runs cupsd with those copies.
+    Configuration changes made with cupsctl persist; changes to the image's defaults reach
+    only new installations.
+  - colord's unit had `ConfigurationDirectory=colord`, which made systemd create
+    `/etc/colord`. A drop-in resets it.
+- **Expected denials.**
+  - `policy/selinux-expected.toml` lists the denials the negative tests are expected to
+    provoke, each with its test and reason. It is empty until step 11.
+  - `tools/integrate.py` records the unexpected denials in the manifest (`unexpected`) and
+    reports their number. Step 11 makes any unexpected denial fail a cycle.
+  - The update test also boots the previous snapshot, whose denials are its own. In that log
+    only the candidate's boots count: each boot starts at the kernel banner, and the test
+    unit names the version it booted.
+- **Tests.**
+  - `tests/vm/run0.script` now has dev's run0 actually administer: restart a unit, set the
+    hostname through hostnamed, read the journal.
+  - The script matches the login prompt for any hostname.
+  - `ci/test-update` skips a `dev` candidate. Outside a cycle the candidate's version sorts
+    before every snapshot (digits sort after letters), so sysupdate finds nothing newer.
+- **Open: `systemd-run` from wheel runs in `init_t`.**
+  - run0 asks PID 1 for a transient unit, and so does `systemd-run`. Both need `system start` on
+    PID 1, and polkit sees the same action (`manage-units`, verb start) with the same unit
+    naming (`run-p<pid>-i<inode>`).
+  - Only run0 adds a PAM session, which is what gives `admin_t`. A wheel user who may use run0
+    can therefore start a transient service without PAM, which runs as root in `init_t`, a
+    platform domain. Neither SELinux nor polkit can tell the requests apart today.
+  - Closing this needs a way to require a PAM session, or `SELinuxContext=admin_t`, on every
+    transient unit a session requests. That is a systemd change, or a privileged broker in
+    place of the direct D-Bus call. It is recorded for the owner; 0.0.3's negative tests cover
+    run0 itself.
+
+## D59. Stage 1 enforcing, negative tests, denial gating
+
+0.0.3 step 11 (security §15, §16, §19.4, §19.5).
+- **Enforcing.**
+  - `files/selinux/config` says `SELINUX=enforcing`, so the production UKI enforces. The
+    separately signed development UKI boots with `enforcing=0` (security §19.4).
+  - `loader.conf` has `editor no`.
+  - Secure Boot is still not enforced in QEMU, so a host that controls the firmware can boot
+    the development UKI, which is the documented §19.5 limitation.
+- **The mode is tested, not assumed.**
+  - `ci/boot` injects a unit that reads `/sys/fs/selinux/enforce`, and requires
+    `BEAMLINE_SELINUX_ENFORCE=1` on the default boot.
+  - `ci/test-boot-entries` requires the production entry to enforce and the development entry
+    to be permissive.
+- **Gating.** A cycle whose tests pass but which recorded an unexpected denial is recorded as
+  failed. The manifest says why, and `ci/integrate` exits non-zero.
+- **What enforcing exposed.** The first enforcing run passed everything except the desktop:
+  GDM's session never started, and nothing was recorded.
+  - Each user manager is an SELinux object manager, like PID 1. It checks the session's requests
+    against systemd's `system` and `service` classes: uploading gnome-session's environment, or
+    starting D-Bus-activated user services. `user_t` had none of those permissions.
+  - A user manager is unprivileged and cannot write audit records, so it logs its denials as
+    ordinary journal messages. The report units read only `_TRANSPORT=audit`, so these denials
+    never reached the console, in permissive cycles (D58's included) or enforcing ones.
+  - The report units now read every transport and print to the console only, so their own
+    output cannot come back as input. Kernel denials can then appear twice, through audit and
+    through the kernel log; `tools/integrate.py` counts distinct denials.
+  - User units now have their own type, `user_unit_file_t` (`/usr/lib/systemd/user`,
+    `/etc/systemd/user`; immutable). The session may manage those and its own generated,
+    transient and home units, and its user manager itself. PID 1's units keep `usr_t` and
+    `etc_t`, on which `user_t` has only `status`, so the same `service` permission does not
+    reach system units.
+- **Negative tests (`ci/test-security`).**
+  - One boot, enforcing. A test unit (root, `init_t`, the harness) merges the admin extension
+    for `cp`, `insmod` and `setenforce`. It runs each check through `systemd-run --wait --pipe`
+    with the check's own `SELinuxContext=` and `User=`.
+  - Checks that must be refused run as root, so that SELinux, not file permissions, is what
+    refuses them.
+
+  | Check | Result |
+  |---|---|
+  | P0 (alice) executes an unsigned ELF it copied to `/var/tmp` | allowed |
+  | P0 writes `/usr` | refused (read-only, verity-backed) |
+  | P0 and `admin_t` append to `/etc/pam.d/login` | refused (SELinux) |
+  | `admin_t` rewrites `/etc/hostname` | allowed |
+  | P0 enters `sysupdate_t` or `admin_t` through `/proc/self/attr/exec` | refused (transition) |
+  | `sysupdate_t` executes the ELF in `/var/tmp` | refused (execute on `tmp_t`) |
+  | `admin_t` runs `setenforce 0` | refused, enforcement stays on |
+  | `admin_t` runs `insmod` | refused (`sys_module`) |
+  | alice reads dev's active home | refused (DAC: homes are 0700; homed encrypts them at rest) |
+
+  - Covered elsewhere: tampered and unsigned extensions (`ci/test-extensions`), rollback
+    (`ci/test-update`), the unauthorized update request (`ci/test-run0`), and the production
+    boot's mode (`ci/boot`).
+  - Deferred, as security §15 says:
+    - the Python script, since no artifact ships an interpreter;
+    - privileged BPF, since none ships BPF tooling;
+    - `beamlinectl`, the updater's library and script loading, and containers.
+- **Expected denials.** `policy/selinux-expected.toml` lists the 11 denials these tests provoke.
+  Two come from `ci/test-settings`'s deliberate write outside the allowlist; nine from
+  `ci/test-security`, including the capability checks of the P0 checks that run as root.
+  Nothing else may deny.
+- **Not closed.** A wheel member can still reach `init_t` through `systemd-run` (D58, security
+  §9.4).

@@ -18,7 +18,7 @@ log "run0: wheel escalates into admin_t, others are refused, root cannot log in"
 python3 "$REPO/tools/qemu-test.py" --arch "$ARCH" --image "$image" \
     --serial-script "$REPO/tests/vm/run0.script" \
     --kernel-arg systemd.mask=systemd-sysext.service \
-    --kernel-arg systemd.mask=systemd-confext.service \
+    --kernel-arg systemd.mask=beamline-extensions-link.service \
     --require 'RUN0_CONTEXT=admin_u:admin_r:admin_t' --require 'RUN0_UID=0' \
     --require 'RUN0_SHELL_CONTEXT=admin_u:admin_r:admin_t' --require 'Access denied' --require 'PK_DENIED=[0-9]' \
     --expect 'Login incorrect' --timeout 420 \

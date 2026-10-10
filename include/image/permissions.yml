@@ -4,7 +4,7 @@
 # docs/decisions.md D31). An element that creates a filesystem includes this, build-depends
 # on image/permissions.bst, and runs on a writable copy of its tree:
 #   %{apply-permissions}
-#   apply_permissions /work/root
+#   apply_permissions "%{image-scratch}/root"
 # Paths absent from the tree are skipped, so one list serves the root and its subsets.
 
 variables:

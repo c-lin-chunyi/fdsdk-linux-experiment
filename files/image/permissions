@@ -13,3 +13,7 @@
 # systemd installs its credential stores 0700.
 0700 /etc/credstore
 0700 /etc/credstore.encrypted
+
+# fwupd keeps its configuration 0640 (it may hold credentials) and otherwise corrects the mode
+# at startup, which /etc's immutability refuses (docs/decisions.md D58).
+0640 /etc/fwupd/fwupd.conf

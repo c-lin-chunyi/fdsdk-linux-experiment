@@ -568,35 +568,97 @@ AVC = re.compile(r"avc:\s+denied\s+\{ (?P<perms>[^}]+) \} for .*?"
                  r"scontext=(?P<scontext>\S+) tcontext=(?P<tcontext>\S+) tclass=(?P<tclass>\S+)")
 AVC_COMM = re.compile(r"\bcomm=(\"[^\"]*\"|\S+)")
 SELINUX_CONFIG = os.path.join(REPO, "files", "selinux", "config")
+SELINUX_EXPECTED = os.path.join(REPO, "policy", "selinux-expected.toml")
 
 
 TEST_LOGS = ("serial.log", "serial-reboot.log", "serial-verity.log", "serial-boot-entries.log",
-             "serial-update.log", "serial-run0.log", "serial-settings.log", "serial-admin.log",
-             "serial-trust.log", "serial-desktop.log")
+             "serial-update.log", "serial-run0.log", "serial-settings.log", "serial-security.log",
+             "serial-admin.log", "serial-trust.log", "serial-desktop.log")
 TEST_EVIDENCE = TEST_LOGS + ("desktop.ppm",)
 
 
-def selinux_summary(serials):
-    """SELinux state and the distinct AVC denials of the VM tests (security §15, §16)."""
+def expected_denials():
+    """The denials the negative tests provoke (policy/selinux-expected.toml, security §15)."""
+    import tomllib
+    with open(SELINUX_EXPECTED, "rb") as f:
+        entries = tomllib.load(f).get("denial", [])
+    for entry in entries:
+        missing = {"scontext", "tcontext", "tclass", "perms", "test", "reason"} - set(entry)
+        if missing:
+            sys.exit(f"integrate: {SELINUX_EXPECTED}: an entry lacks {', '.join(sorted(missing))}")
+    return entries
+
+
+def context_type(context):
+    return context.split(":")[2] if context.count(":") >= 3 else context
+
+
+def is_expected(denial, entries):
+    return any(denial["scontext"] == e["scontext"] and denial["tcontext"] == e["tcontext"]
+               and denial["tclass"] == e["tclass"] and set(denial["perms"]) <= set(e["perms"])
+               and e.get("comm", denial["comm"]) == denial["comm"] for e in entries)
+
+
+# The update test also boots the previous snapshot, whose denials are its own: in that log only the
+# candidate's boots count. Each boot starts with the kernel banner, and the test's unit names the
+# booted version.
+UPDATE_LOG = "serial-update.log"
+KERNEL_BANNER = re.compile(r"\]\s+Linux version ")
+BOOTED_VERSION = re.compile(r"\bbooted (\S+) \(old ")
+
+
+def serial_lines(serial, snapshot):
+    """The lines of a test's serial log that belong to the snapshot under test."""
+    with open(serial, encoding="utf-8", errors="replace") as f:
+        lines = f.readlines()
+    if not (snapshot and os.path.basename(serial).endswith(UPDATE_LOG)):
+        return lines
+    boots, current = [], []
+    for line in lines:
+        if KERNEL_BANNER.search(line) and current:
+            boots.append(current)
+            current = []
+        current.append(line)
+    boots.append(current)
+    kept = []
+    for boot in boots:
+        versions = [m.group(1) for m in map(BOOTED_VERSION.search, boot) if m]
+        if versions and versions[0] == snapshot:
+            kept.extend(boot)
+    return kept
+
+
+def selinux_summary(serials, snapshot=None):
+    """SELinux state and the distinct AVC denials of the VM tests, split into those the negative
+    tests are expected to provoke and unexpected ones (security §15, §16)."""
     mode = None
     if os.path.exists(SELINUX_CONFIG):
         for line in open(SELINUX_CONFIG, encoding="utf-8"):
             if line.startswith("SELINUX="):
                 mode = line.split("=", 1)[1].strip()
-    denials, loaded = set(), False
+    entries = expected_denials()
+    denials, unexpected, loaded = set(), set(), False
     for serial in serials:
         if not os.path.exists(serial):
             continue
-        for line in open(serial, encoding="utf-8", errors="replace"):
+        for line in serial_lines(serial, snapshot):
             loaded = loaded or "BEAMLINE_SELINUX_OK" in line
             m = AVC.search(line)
             if m:
                 c = AVC_COMM.search(line)
                 comm = c.group(1).strip('"') if c else ""
-                denials.add(f"{{ {m.group('perms')} }} comm={comm} scontext={m.group('scontext')} "
-                            f"tcontext={m.group('tcontext')} tclass={m.group('tclass')}")
+                text = (f"{{ {m.group('perms')} }} comm={comm} scontext={m.group('scontext')} "
+                        f"tcontext={m.group('tcontext')} tclass={m.group('tclass')}")
+                denials.add(text)
+                denial = {"scontext": context_type(m.group("scontext")),
+                          "tcontext": context_type(m.group("tcontext")),
+                          "tclass": m.group("tclass"), "perms": m.group("perms").split(),
+                          "comm": comm}
+                if not is_expected(denial, entries):
+                    unexpected.add(text)
     return {"policy_loaded": loaded, "mode": mode, "avc_denials": len(denials),
-            "denials": sorted(denials)}
+            "denials": sorted(denials), "unexpected_denials": len(unexpected),
+            "unexpected": sorted(unexpected)}
 
 
 def ppm_to_png(src, dest):
@@ -665,7 +727,17 @@ def cmd_record(args):
     previous = latest()
     image_dir = os.path.join(OUT, args.arch, "virt")
 
-    manifest["selinux"] = selinux_summary([os.path.join(image_dir, name) for name in TEST_LOGS])
+    manifest["selinux"] = selinux_summary([os.path.join(image_dir, name) for name in TEST_LOGS],
+                                          snapshot)
+    # From Stage 1 enforcing, an unexpected denial makes a cycle red (security §15, §16).
+    gated = False
+    unexpected = manifest["selinux"]["unexpected"]
+    if args.result == "green" and unexpected:
+        log(f"SELinux: {len(unexpected)} unexpected AVC denials; the integration is not green:")
+        for denial in unexpected:
+            log(f"  {denial}")
+        args.result, gated = "failed", True
+        manifest["failure"] = "unexpected SELinux denials (policy/selinux-expected.toml)"
     if args.result in ("failed", "aborted"):
         manifest["result"] = args.result
         manifest["changed_since_green"] = changed_since(manifest, previous)
@@ -677,7 +749,7 @@ def cmd_record(args):
             f"({previous['snapshot'] if previous else 'none'})")
         log(f"inputs changed since latest: {', '.join(manifest['changed_since_green']) or 'none'}")
         log(f"record: {workdir}")
-        return 0
+        return 1 if gated else 0
 
     dest = os.path.join(SNAPSHOTS, snapshot)
     os.makedirs(dest)
@@ -705,7 +777,7 @@ def cmd_record(args):
     os.remove(CURRENT)
     sel = manifest["selinux"]
     log(f"SELinux: policy {'loaded' if sel['policy_loaded'] else 'NOT loaded'}, {sel['mode']}, "
-        f"{sel['avc_denials']} distinct AVC denials recorded")
+        f"{sel['avc_denials']} distinct AVC denials recorded, {sel['unexpected_denials']} unexpected")
     conformity = manifest["head_conformity"]
     log(f"snapshot {snapshot} GREEN: latest → {snapshot} "
         f"({conformity if manifest.get('mode') == 'frozen' else conformity + ' at HEAD'})")

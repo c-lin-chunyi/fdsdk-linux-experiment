@@ -1,0 +1,28 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+#
+# Negative security tests on the checked-out Virt image (docs/security.md §15, §16; docs/decisions.md
+# D59), on the enforcing production boot: P0 runs its own unsigned ELF; P0 cannot change /usr; P0
+# and admin_t cannot write outside /etc's allowlist, admin_t can write a setting; P0 cannot enter
+# the updater's or the admin domain; the updater cannot execute a helper from /var/tmp; admin_t
+# can neither switch SELinux off nor load a module; alice cannot read dev's home. The tampered and
+# unsigned extensions (ci/test-extensions), rollback (ci/test-update) and the unauthorized update
+# request (ci/test-run0) are tested elsewhere. Every denial these checks provoke must be listed in
+# policy/selinux-expected.toml. The image itself is never modified.
+#   ./ci/test-security [path/to/disk.raw]
+
+# shellcheck source=ci/lib.sh
+. "$(dirname "$0")/lib.sh"
+
+image="${1:-$OUT/disk.raw}"
+[ -f "$image" ] || die "$image not found; run ./ci/image first"
+log "security: the negative tests, enforcing"
+python3 "$REPO/tools/qemu-test.py" --arch "$ARCH" --image "$image" \
+    --credential-file "beamline.test.security-script=$REPO/tests/vm/security-check.sh" \
+    --extra-unit "$REPO/tests/vm/beamline-security-check.service" \
+    --wants beamline-security-check.service \
+    --kernel-arg systemd.mask=systemd-sysext.service \
+    --kernel-arg systemd.mask=beamline-extensions-link.service \
+    --require BEAMLINE_SELINUX_OK --expect BEAMLINE_SECURITY_OK \
+    --fail-on BEAMLINE_SECURITY_FAILED --timeout 600 \
+    --log "$(dirname "$image")/serial-security.log"

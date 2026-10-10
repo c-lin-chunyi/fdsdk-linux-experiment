@@ -3,9 +3,12 @@
 #
 # Boot the checked-out Virt image on this host (HVF on macOS, KVM or TCG on Linux) and
 # wait for BEAMLINE_BOOT_OK on the serial console, after BEAMLINE_SELINUX_OK (a policy is
-# loaded, docs/security.md §16). The extensions are not merged: the base must boot healthy
-# without any desktop (docs/spec.md §5.1; ci/test-desktop covers the merged system). The
-# image itself is never modified.
+# loaded) and BEAMLINE_SELINUX_ENFORCE=1 (the production boot enforces, docs/security.md §16).
+# The extensions are not merged: the base must boot healthy without any desktop
+# (docs/spec.md §5.1; ci/test-desktop covers the merged system). No
+# extension image is linked, but systemd-confext still refreshes /etc with its mutable layer, as
+# on every production boot (it labels the layer's root, docs/decisions.md D58). The image itself
+# is never modified.
 #   ./ci/boot [path/to/disk.raw]
 
 # shellcheck source=ci/lib.sh
@@ -14,6 +17,9 @@
 image="${1:-$OUT/disk.raw}"
 [ -f "$image" ] || die "$image not found; run ./ci/image first"
 python3 "$REPO/tools/qemu-test.py" --arch "$ARCH" --image "$image" \
+    --extra-unit "$REPO/tests/vm/beamline-selinux-mode.service" \
+    --wants beamline-selinux-mode.service \
     --kernel-arg systemd.mask=systemd-sysext.service \
-    --kernel-arg systemd.mask=systemd-confext.service \
-    --require BEAMLINE_SELINUX_OK --log "$(dirname "$image")/serial.log"
+    --kernel-arg systemd.mask=beamline-extensions-link.service \
+    --require BEAMLINE_SELINUX_OK --require 'BEAMLINE_SELINUX_ENFORCE=1' \
+    --log "$(dirname "$image")/serial.log"

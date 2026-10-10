@@ -9,6 +9,7 @@ enable systemd-timesyncd.service
 enable beamline-boot-ok.service
 enable beamline-selinux-ok.service
 enable beamline-avc-report.service
+enable beamline-avc-follow.service
 enable beamline-extensions-link.service
 enable beamline-extensions-start.service
 

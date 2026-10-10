@@ -3,9 +3,9 @@ projects:
     base/shell-compat.bst:
     - ref: v0.5.13.5-0-g037bbdfd330017c368caf6242f977974123239b5
     kernel/linux-virt.bst:
-    - ref: 788af51315d25cd54ad15f140d830bf976c37d2cbbac3056207cd2694ddc5f6c
+    - ref: 5769c481bf384a7f518cb7816224aaf5b0c2e3627efe80902ad9292250b3b263
     overrides/systemd-base.bst:
-    - ref: v262-375-g25428cd65656ff69b7e75f86cd10f6d9753ec2e9
+    - ref: v262-384-g570c46894b820ff62df91be9f3eeafa7acec3998
     overrides/linux-pam-base.bst:
     - ref: v1.7.3-0-g28fce1fd55b003fec90f34e5bc785e9439b216f2
     overrides/dbus-broker.bst:
@@ -22,9 +22,9 @@ projects:
     security/selinux-tools.bst:
     - ref: 3.11-267-g5e0e5c890c41611899085f9234ecf49f2ce7479c
     kernel/selinux-headers.bst:
-    - ref: 788af51315d25cd54ad15f140d830bf976c37d2cbbac3056207cd2694ddc5f6c
+    - ref: 5769c481bf384a7f518cb7816224aaf5b0c2e3627efe80902ad9292250b3b263
     admin/uutils-coreutils.bst:
-    - ref: 0.12.0-362-g6b35c0b666d0684cd5efe74101a156e64cc807f0
+    - ref: 0.12.0-380-g7bc1eb6d1d6fa2e1dc2c9d2277cf576c05f61e47
     - ref:
       - name: aho-corasick
         version: 1.1.5
@@ -1122,6 +1122,6 @@ projects:
         version: 0.8.3
         sha: f05cd8797d63865425ff89b5c4a48804f35ba0ce8d125800027ad6017d2b5249
     overrides/evolution-data-server.bst:
-    - ref: 3.62.0-32-gacb90dfabaacf6e88dda6d22369200bc729d40f0
+    - ref: 3.62.0-39-gc9b22ef82faf0723afe0255aa70edc2cdc531800
     desktop/file-roller.bst:
     - ref: 44.7-14-g8ca93d777e7766cd720b4ceab2eb47b859fad675

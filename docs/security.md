@@ -242,6 +242,8 @@ However, executable artifacts stored on mutable DATA shall default to P0 without
 
 Trusted services shall not execute arbitrary helpers, libraries, scripts, or plugins from writable DATA.
 
+From Stage 1 the policy enforces this by type. Content a lower integrity level can write (DATA, homes, temporary and runtime files, `/dev/shm`, the ESP) carries types that platform and admin domains may never execute; a `neverallow`, checked when the policy is compiled, keeps any rule from granting it. The filesystem labels go further: the types of SYSTEM code may never be associated with DATA's filesystems, so no process, whatever label it chooses, can place an executable labelled as platform code on DATA.
+
 System-managed state under `/var` shall receive service-specific SELinux types and restricted write authority.
 
 ## 7. SELinux Policy
@@ -440,13 +442,14 @@ Service-specific functionality shall determine applicable restrictions.
   The admin domain is P2, delegated authority: it may manage services, units and the allowlisted settings. It is never P3.
 - **polkit rules are platform code.** polkit evaluates its JavaScript rules with an interpreter (duktape). Rules are read only from SYSTEM (`/usr/share/polkit-1/rules.d`); `/etc/polkit-1/rules.d` stays empty, and no mutable location feeds rules.
 - `pkexec` is never shipped: a setuid general-purpose command runner contradicts §9.1.
+- **Known gap (0.0.3).** run0 is a client of PID 1's transient-unit call, and so is `systemd-run`. polkit sees the same action and the same unit naming for both, and SELinux the same `system start` permission. Only run0 adds the PAM session that leads to `admin_t`, so a wheel member can start a transient service without it, which runs in `init_t`. Requiring a PAM session or the admin context on every transient unit a session requests needs a systemd change or a privileged broker (decisions D58).
 
 ### 9.5 Scoped mutable configuration
 
 `/etc` is read-only except the allowlist in spec §14, which `systemd-confext`'s mutable layer writes on DATA. DATA is not authenticated, so the layer is untrusted at every boot. The initrd rebuilds it from the allowlisted files alone before merging it, so nothing else written into it (offline, or during a permissive boot) reaches `/etc`. The allowlisted files themselves stay validated input to the services that parse them (§9.2), never platform code. At runtime the scope is SELinux:
 
 - each allowlisted path has its own file type (hostname and machine-info, timezone and RTC, locale and keymap, machine ID). In Stage 0 and 1 the platform domains, where the systemd settings services run, may write them; Stage 2 narrows that to the services' own domains;
-- every other `/etc` type belongs to an immutable attribute. A `neverallow`, checked when the policy is compiled, keeps every domain, platform domains included, from creating, writing, renaming, unlinking or relabelling it;
+- every other `/etc` type belongs to an immutable attribute. A `neverallow`, checked when the policy is compiled, keeps every domain, platform domains included, from creating, writing, renaming, unlinking or relabelling it. The one exception is the extension merger (`sysext_t`, `systemd-sysext` and `systemd-confext`): building a merged hierarchy gives its root, its work directory and its metadata the hierarchy's own types, and the merger mounts the overlay. Every write through the merged `/etc` is checked against the writing process first;
 - systemd creates its temporary files with the label of the target path, so a service can replace its own file without being able to replace any other.
 
 The scope holds in enforcing boots. The permissive development UKI does not enforce it, as with every other rule.
@@ -649,7 +652,7 @@ CI shall include positive and negative enforcement tests. They run in the Virt p
 
 Security testing shall inspect actual SELinux contexts, domain transitions, executable mappings, audit records, and service permissions.
 
-In 0.0.3 (Stage 1) integration cycles run these tests: arbitrary unsigned ELF; modification of verified `/usr`; writes to privileged executable state and to non-allowlisted `/etc`; direct entry into the updater and admin domains; the updater executing `/var/tmp/helper`; unsigned module loading; `setenforce`; authorized and unauthorized update requests; signed and tampered sysext activation; another user's files; rollback; and the production UKI's enforcing mode. These tests are deferred, with their reason:
+In 0.0.3 (Stage 1) integration cycles run these tests: arbitrary unsigned ELF; modification of verified `/usr`; writes to privileged executable state and to non-allowlisted `/etc`; direct entry into the updater and admin domains; the updater executing `/var/tmp/helper`; unsigned module loading; `setenforce`; authorized and unauthorized update requests; signed and tampered sysext activation; another user's files (refused by file permissions and homed's encryption: Stage 1 does not separate users by type or category); rollback; and the production UKI's enforcing mode. `ci/test-security` runs the checks that must be refused as root, so that SELinux, not file permissions, is what refuses them. These tests are deferred, with their reason:
 - the Python script, because no artifact ships an interpreter (a test extension or P0 container follows);
 - privileged BPF loading, because no artifact ships BPF tooling;
 - `beamlinectl`, the updater's library and script loading, and containers, which wait for the components they exercise (Stage 2).
@@ -678,7 +681,7 @@ Policy changes shall require regression testing against prohibited grants.
 - Arrives together with dm-verity, signed UKIs and development keys, so enforcement cannot be undone by editing the command line on a development-key system.
 - Policy contents in 0.0.3:
   - the full kernel class map with `handleunknown deny`;
-  - platform domains (`init_t` and the services it starts), with the settings writers (hostnamed, timedated, localed), the updater (`sysupdate_t`) and homed (`homed_t`) in their own domains;
+  - platform domains (`init_t` and the services it starts), with the settings writers (hostnamed, timedated, localed), the updater (`sysupdate_t`), homed (`homed_t`) and the extension merger (`sysext_t`, §9.5) in their own domains. Platform domains never execute content a lower level can write (§6.3);
   - `admin_t` for run0 (§9.4);
   - `user_t` for human sessions (P0). It keeps `execmem`, because P0 code may use a JIT (§8.4); GNOME Shell's JavaScript engine runs there.
 

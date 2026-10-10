@@ -17,6 +17,7 @@
 "$REPO/ci/test-update"
 "$REPO/ci/test-run0"
 "$REPO/ci/test-settings"
+"$REPO/ci/test-security"
 "$REPO/ci/test-extensions"
 "$REPO/ci/test-desktop"
 log "test-all: passed"

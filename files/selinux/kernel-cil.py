@@ -10,8 +10,9 @@ policy always matches the kernel it ships with.
   kernel-cil.py --headers DIR --out kernel.cil --policy-version-file FILE
 
 Emits: classes, classorder, initial SIDs and sidorder, the MCS sensitivity and categories,
-and the Stage 0 platform allow rules (every class except `security`, which policy.cil
-grants selectively so that the setenforce/load_policy neverallow holds).
+the platform domains' broad allow rules (every class except `security`, which policy.cil
+grants selectively so that the setenforce/load_policy neverallow holds), and the user
+domains' rules on their own sockets.
 
 Standard library only.
 """
@@ -93,6 +94,9 @@ IMMUTABLE_READ = {"read", "getattr", "open", "map", "execute", "execute_no_trans
                   "search", "entrypoint", "audit_access", "watch", "watch_mount", "watch_sb",
                   "watch_with_perm", "watch_reads", "mounton"}
 DIR_ENTRIES = {"write", "add_name", "remove_name"}
+# What platform domains never do to content a lower integrity level can write (DATA, homes,
+# temporary and runtime files): execute it (docs/security.md §6.3, §7.4, Stage 1).
+EXECUTE = {"execute", "execute_no_trans", "entrypoint", "execmod"}
 
 
 def main():
@@ -129,18 +133,27 @@ def main():
     out.append(f"(categoryorder ({' '.join(f'c{i}' for i in range(CATEGORIES))}))")
     out.append(f"(sensitivitycategory s0 (range c0 c{CATEGORIES - 1}))")
     out.append("")
-    out.append("; Stage 0: platform domains are unconfined, except for the security class and for")
-    out.append("; changes to SYSTEM's immutable files (docs/decisions.md D56): on those they may read,")
-    out.append("; execute and change directory entries, never create, write, rename or remove files.")
+    out.append("; Platform domains (Stage 1: the services stay broad until Stage 2) get every class but")
+    out.append("; security. On SYSTEM's immutable files (docs/decisions.md D56) they may read, execute and")
+    out.append("; change directory entries, never create, write, rename or remove files; content a lower")
+    out.append("; integrity level can write they may change but never execute (docs/security.md §6.3).")
     for name, perms in cls:
         if name == "security":
             continue
         if name in FILE_CLASSES:
-            out.append(f"(allow beamline_platform_domain beamline_mutable_type ({name} (all)))")
+            out.append(f"(allow beamline_platform_domain beamline_trusted_mutable_type ({name} (all)))")
+            data = [p for p in perms if p not in EXECUTE]
+            out.append(f"(allow beamline_platform_domain beamline_untrusted_type ({name} ({' '.join(data)})))")
             allowed = [p for p in perms if p in IMMUTABLE_READ or (name == "dir" and p in DIR_ENTRIES)]
             out.append(f"(allow beamline_platform_domain beamline_immutable_file_type ({name} ({' '.join(allowed)})))")
         else:
             out.append(f"(allow beamline_platform_domain beamline_any_type ({name} (all)))")
+    out.append("")
+    out.append("; Sockets: user and admin domains may use every socket class among their own processes.")
+    out.append("; Reaching another domain's socket needs a rule in policy.cil.")
+    for name, _perms in cls:
+        if name == "socket" or name.endswith("_socket"):
+            out.append(f"(allow beamline_session_domain self ({name} (all)))")
 
     with open(args.out, "w", encoding="utf-8") as f:
         f.write("\n".join(out) + "\n")
